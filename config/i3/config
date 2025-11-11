@@ -494,25 +494,27 @@ exec --no-startup-id tailscale-systray
 # color settings for bar and windows #
 ######################################
 
-# Define colors variables:
-set $darkbluetrans  #08052be6
-set $darkblue       #08052b
-set $lightblue      #5294e2
-set $urgentred      #e53935
-set $white          #ffffff
-set $black          #000000
-set $purple         #e345ff
-set $darkgrey       #383c4a
-set $grey           #b0b5bd
-set $mediumgrey     #8b8b8b
-set $yellowbrown    #e1b700
+# Define colors variables (Rose Pine theme):
+set $rp_base        #191724
+set $rp_surface     #1f1d2e
+set $rp_overlay     #26233a
+set $rp_muted       #6e6a86
+set $rp_subtle      #908caa
+set $rp_text        #e0def4
+set $rp_love        #eb6f92
+set $rp_gold        #f6c177
+set $rp_rose        #ebbcba
+set $rp_pine        #31748f
+set $rp_foam        #9ccfd8
+set $rp_iris        #c4a7e7
+set $rp_highlight   #524f67
 
 # define colors for windows:
-#class                      border      bground     text        indicator   child_border
-client.focused              $lightblue  $darkblue   $white      $mediumgrey $mediumgrey
-client.unfocused            $darkblue   $darkblue   $grey       $darkgrey   $darkgrey
-client.focused_inactive     $darkblue   $darkblue   $grey       $black      $black
-client.urgent               $urgentred  $urgentred  $white      $yellowbrown    $yellowbrown
+#class                      border          bground         text        indicator       child_border
+client.focused              $rp_iris        $rp_base        $rp_text    $rp_highlight   $rp_iris
+client.unfocused            $rp_overlay     $rp_base        $rp_subtle  $rp_overlay     $rp_overlay
+client.focused_inactive     $rp_overlay     $rp_base        $rp_muted   $rp_surface     $rp_surface
+client.urgent               $rp_love        $rp_love        $rp_text    $rp_gold        $rp_gold
 
 ############################################
 # bar settings (input comes from i3blocks) #
@@ -537,14 +539,14 @@ strip_workspace_numbers yes
 ##strip_workspace_name no
 
             colors {
-            separator          $purple
-            background         $darkgrey
-            statusline         $white
-#                           border              bg          txt         indicator
-        focused_workspace   $mediumgrey         $grey       $darkgrey   $purple
-        active_workspace    $lightblue          $mediumgrey $darkgrey   $purple
-        inactive_workspace  $darkgrey           $darkgrey   $grey       $purple
-        urgent_workspace    $urgentred          $urgentred  $white      $purple
+            separator          $rp_iris
+            background         $rp_base
+            statusline         $rp_text
+#                           border              bg              txt             indicator
+        focused_workspace   $rp_iris            $rp_overlay     $rp_text        $rp_iris
+        active_workspace    $rp_pine            $rp_surface     $rp_text        $rp_pine
+        inactive_workspace  $rp_surface         $rp_base        $rp_subtle      $rp_overlay
+        urgent_workspace    $rp_love            $rp_love        $rp_text        $rp_gold
     }
 }
 

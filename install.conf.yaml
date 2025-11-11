@@ -9,6 +9,8 @@
     ~/.config/nvim: config/nvim
     ~/.zshrc: config/zshrc
     ~/.config/i3: config/i3
+    ~/.xprofile: config/xprofile
+    ~/.Xmodmap: config/Xmodmap
 
 - shell:
   - [git submodule update --init --recursive, Installing submodules]
