@@ -433,7 +433,7 @@ exec --no-startup-id ~/.screenlayout/monitor.sh
 
 # set wallpaper
 # exec --no-startup-id sleep 2 && nitrogen --restore
-exec --no-startup-id sleep 1 && feh --bg-fill /usr/share/endeavouros/backgrounds/endeavouros-wallpaper.png
+exec --no-startup-id sleep 1 && feh --bg-center /usr/share/endeavouros/backgrounds/eos_wallpapers_community/endeavour_pillarsofcreation.png
 
 # set powersavings for display:
 exec --no-startup-id xset s 480 dpms 600 600 600
@@ -472,7 +472,7 @@ exec --no-startup-id /usr/bin/dunst
 #exec --no-startup-id sleep 7 && firefox https://github.com/endeavouros-team/endeavouros-i3wm-setup/blob/main/force-knowledge.md
 #exec --no-startup-id sleep 3 && thunar
 # Start pCloud on login
-exec --no-startup-id ~/.local/bin/appimages/pcloud.AppImage
+exec --no-startup-id ~/Applications/pcloud
 exec --no-startup-id tailscale-systray
 
 
