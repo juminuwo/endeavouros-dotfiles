@@ -11,6 +11,8 @@
     ~/.config/i3: config/i3
     ~/.xprofile: config/xprofile
     ~/.Xmodmap: config/Xmodmap
+    ~/.config/kitty/kitty.conf: config/kitty.conf
+    ~/.config/kitty/open-actions.conf: config/open-actions.conf
 
 - shell:
   - [git submodule update --init --recursive, Installing submodules]

@@ -7,9 +7,8 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# needs rofi config:
-# $HOME/.config/rofi/powermenu.rasi
-# set to be used in i3wm
+# Define the path to your i3 session save script
+I3_SAVE_SCRIPT="${HOME}/.local/bin/save_i3_session.sh"
 
 ROFI_THEME="${HOME}/.config/rofi/powermenu.rasi"
 # Define possible lock scripts/commands (edit this list as you like)
@@ -17,65 +16,91 @@ LOCK_SCRIPTS=("${HOME}/.config/i3/scripts/blur-lock" "i3lock")
 
 # Find available lock script
 find_lock_script() {
-    for script in "${LOCK_SCRIPTS[@]}"; do
-        # Handle command names vs full paths
-        if [[ "$script" =~ ^[a-zA-Z0-9_-]+$ ]]; then
-            # It's a command name, check if available
-            if command -v "$script" >/dev/null 2>&1; then
-                echo "$script"
-                return 0
-            fi
-        else
-            # It's a path, check if file exists and is executable
-            if [[ -x "$script" ]]; then
-                echo "$script"
-                return 0
-            fi
-        fi
-    done
-    return 1
+  for script in "${LOCK_SCRIPTS[@]}"; do
+    # Handle command names vs full paths
+    if [[ "$script" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+      # It's a command name, check if available
+      if command -v "$script" >/dev/null 2>&1; then
+        echo "$script"
+        return 0
+      fi
+    else
+      # It's a path, check if file exists and is executable
+      if [[ -x "$script" ]]; then
+        echo "$script"
+        return 0
+      fi
+    fi
+  done
+  return 1
 }
+
+# --- New Menu Entry ---
+save_shutdown="+💾 Save & Shutdown"
 
 # Menu entries
 chancel=" Cancel"
-lock="  Lock"
-logout="  Logout"
-reboot="  Reboot"
-shutdown="  Shutdown"
-suspend="  Suspend"
-hibernate="  Hibernate"
-
+lock=" Lock"
+logout=" Logout"
+reboot=" Reboot"
+shutdown=" Shutdown"
+suspend=" Suspend"
+hibernate=" Hibernate"
 
 # Add lock only if script is found
 if lockcmd="$(find_lock_script)"; then
-    options="$chancel\n$lock\n$logout\n$reboot\n$shutdown\n$suspend\n$hibernate"
+  options="$chancel\n$lock\n$logout\n$save_shutdown\n$reboot\n$shutdown"
 else
-    options="$chancel\n$logout\n$reboot\n$shutdown\n$suspend\n$hibernate"
+  options="$chancel\n$logout\n$save_shutdown\n$reboot\n$shutdown"
 fi
 
 chosen="$(echo -e "$options" | rofi -dmenu -i -p "Power Menu" \
-    -theme $ROFI_THEME)"
+  -theme $ROFI_THEME)"
 
 case $chosen in
-    "$lock")
-        $lockcmd
-        ;;
-    "$cancel"|"")
-        exit 0
-        ;;
-    "$logout")
-        i3-msg exit
-        ;;
-    "$reboot")
-        systemctl reboot
-        ;;
-    "$shutdown")
-        systemctl poweroff
-        ;;
-    "$suspend")
-        systemctl suspend
-        ;;
-    "$hibernate")
-        systemctl hibernate
-        ;;
+"$lock")
+  $lockcmd
+  ;;
+"$cancel" | "")
+  exit 0
+  ;;
+"$logout")
+  i3-msg exit
+  ;;
+"$reboot")
+  systemctl reboot
+  ;;
+"$shutdown")
+  systemctl poweroff
+  ;;
+# --- New Case Block for Save & Shutdown ---
+"$save_shutdown")
+  # 1. Run the i3 save script
+  # Check if the script exists and is executable before proceeding
+  if [[ -x "$I3_SAVE_SCRIPT" ]]; then
+    # Run the save script (using bash to handle environment/expansion)
+    /bin/bash -c "$I3_SAVE_SCRIPT"
+
+    # Use '&&' to only poweroff if the save script finished successfully (exit code 0)
+    if [ $? -eq 0 ]; then
+      systemctl poweroff
+    else
+      echo "i3 session save failed. Aborting shutdown."
+      notify-send "i3-resurrect Warning" "Session save failed. Shutdown aborted."
+      exit 1
+    fi
+  else
+    # Fallback if the script path is wrong or the script is missing
+    echo "i3 save script not found or not executable: $I3_SAVE_SCRIPT"
+    notify-send "i3-resurrect Error" "Save script not found. Aborting shutdown."
+    exit 1
+  fi
+  ;;
+# ----------------------------------------
+"$suspend")
+  systemctl suspend
+  ;;
+"$hibernate")
+  systemctl hibernate
+  ;;
 esac

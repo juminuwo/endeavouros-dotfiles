@@ -48,17 +48,17 @@ workspace_layout default
 ##############################
 
 #border indicator on windows:
-new_window pixel 1
+new_window pixel 5
 
 # thin borders
-# hide_edge_borders both
+hide_edge_borders smart
 
 # Set inner/outer gaps
 gaps inner 0
 gaps outer 0
 
 # show window title bars (not officially supported with i3gaps)
-#default_border normal
+default_border pixel 5
 
 # window title alignment
 #title_align center
@@ -296,12 +296,13 @@ bindsym XF86AudioNext exec --no-startup-id playerctl next
 bindsym XF86AudioPrev exec --no-startup-id playerctl previous
 
 # toggle between audio devices for output
-bindsym $mod+p exec --no-startup-id ~/.config/i3/scripts/audio-device-switch
+# bindsym $mod+p exec --no-startup-id ~/.config/i3/scripts/audio-device-switch
 
 ## App shortcuts
 # bindsym $mod+w exec --no-startup-id /usr/bin/firefox
 # bindsym $mod+n exec --no-startup-id /usr/bin/thunar
-bindsym Print exec --no-startup-id scrot ~/%Y-%m-%d-%T-screenshot.png && notify-send "Screenshot saved to ~/$(date +"%Y-%m-%d-%T")-screenshot.png"
+# bindsym Print exec --no-startup-id scrot ~/%Y-%m-%d-%T-screenshot.png && notify-send "Screenshot saved to ~/$(date +"%Y-%m-%d-%T")-screenshot.png"
+bindsym Print exec flameshot gui
 
 # Power Profiles menu switcher (rofi)
 # bindsym $mod+Shift+p exec --no-startup-id ~/.config/i3/scripts/power-profiles
@@ -364,8 +365,12 @@ for_window [class="Bluetooth-sendto" instance="bluetooth-sendto"] floating enabl
 for_window [class="Pamac-manager"] floating enable
 for_window [window_role="About"] floating enable
 
+for_window [class="Code"] border pixel 5
+for_window [class="Cursor"] border pixel 5
+for_window [class="com.mitchellh.ghostty"] border pixel 5
+
 # set border of floating window
-for_window [class="urxvt"] border pixel 1
+# for_window [class="urxvt"] border pixel 1
 
 # set size of floating window
 #for_window [window_role="(?i)GtkFileChooserDialog"] resize set 640 480 #to set size of file choose dialog
@@ -402,7 +407,11 @@ exec_always $HOME/.config/i3/scripts/import-gsettings
 
 
 ## applications/services
+# i3-resurrect auto run for all workspaces and programs
+exec --no-startup-id ~/.local/bin/restore_i3_session.sh
 
+# nordtray startup
+exec --no-startup-id /usr/lib/nordtray/nordtray
 
 #get auth work with polkit-gnome
 exec --no-startup-id /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1
@@ -429,14 +438,17 @@ exec --no-startup-id dex --autostart --environment i3
 
 # start a script to setup displays
 # uncomment the next line, use arandr to setup displays and save the file as monitor:
-exec --no-startup-id ~/.screenlayout/monitor.sh
+# exec --no-startup-id ~/.screenlayout/monitor.sh
+
+# for vscode startup
+exec --no-startup-id gnome-keyring-daemon --start --components=secrets
 
 # set wallpaper
-# exec --no-startup-id sleep 2 && nitrogen --restore
+exec --no-startup-id sleep 2 && nitrogen --restore
 exec --no-startup-id sleep 1 && feh --bg-center /usr/share/endeavouros/backgrounds/eos_wallpapers_community/endeavour_pillarsofcreation.png
 
 # set powersavings for display:
-exec --no-startup-id xset s 480 dpms 600 600 600
+# exec --no-startup-id xset s 480 dpms 600 600 600
 
 # disable power saving (for example if using xscreensaver)
 #exec --no-startup-id xset -dpms
