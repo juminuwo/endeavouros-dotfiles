@@ -483,9 +483,9 @@ exec --no-startup-id /usr/bin/dunst
 #exec --no-startup-id sleep 2 && xfce4-terminal
 #exec --no-startup-id sleep 7 && firefox https://github.com/endeavouros-team/endeavouros-i3wm-setup/blob/main/force-knowledge.md
 #exec --no-startup-id sleep 3 && thunar
-# Start pCloud on login
-exec --no-startup-id ~/Applications/pcloud
 exec --no-startup-id tailscale-systray
+exec --no-startup-id caffeine
+exec --no-startup-id fcitx5 -d
 
 
 ## system tray

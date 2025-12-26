@@ -132,4 +132,12 @@ function y() {
 }
 
 # kitty ls click to open ls
-alias ls='eza --long --hyperlink --git'
+alias ls='eza --git'
+
+# bun completions
+[ -s "/home/howis/.local/share/reflex/bun/_bun" ] && source "/home/howis/.local/share/reflex/bun/_bun"
+
+# bun
+export BUN_INSTALL="$HOME/.local/share/reflex/bun"
+export PATH="$BUN_INSTALL/bin:$PATH"
+eval "$(zoxide init zsh)"
