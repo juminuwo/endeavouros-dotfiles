@@ -141,3 +141,10 @@ alias ls='eza --git'
 export BUN_INSTALL="$HOME/.local/share/reflex/bun"
 export PATH="$BUN_INSTALL/bin:$PATH"
 eval "$(zoxide init zsh)"
+
+# Launch Claude Code with tab title set to current directory
+cc() {
+    local dir_name="${PWD##*/}"
+    kitty @ set-tab-title "claude: $dir_name"
+    claude "$@"
+}
