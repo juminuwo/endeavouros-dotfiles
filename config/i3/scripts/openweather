@@ -7,12 +7,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 
-# openweater - OpenWeatherMap Weather Fetcher for Waybar/Status Bars
-# Secure API key handling with configurable locations
+# openweather - OpenWeatherMap Weather Fetcher for Waybar/Status Bars
+# Secure API key handling with configurable locations using lat/lon coordinates
 # including setup script and help
 # Options:
 #    -h, --help              Show this help message
-#    -c, --city-id ID        Override city ID (required if not in config)
+#    -l, --location LAT,LON  Override location (lat,lon)
 #    -k, --api-key KEY       Override API key (not recommended, use config file)
 #    -u, --units UNITS       Units: metric, imperial, kelvin (default: $DEFAULT_UNITS)
 #    -f, --force-refresh     Force refresh (ignore cache)
@@ -57,30 +57,30 @@ Secure OpenWeatherMap weather fetcher with configurable locations.
 
 Options:
     -h, --help              Show this help message
-    -c, --city-id ID        Override city ID (required if not in config)
+    -l, --location LAT,LON  Override location coordinates
     -k, --api-key KEY       Override API key (not recommended, use config file)
     -u, --units UNITS       Units: metric, imperial, kelvin (default: $DEFAULT_UNITS)
     -f, --force-refresh     Force refresh (ignore cache)
     --setup                 Interactive setup wizard
     --show-config           Show current configuration
-    
+
 Configuration:
     Config file: $CONFIG_FILE
-    
+
     Create config file with:
     OPENWEATHER_API_KEY="your_api_key_here"
-    OPENWEATHER_CITY_ID="your_city_id"  # Required
+    OPENWEATHER_LAT="52.29"             # Latitude
+    OPENWEATHER_LON="-0.60"             # Longitude
     OPENWEATHER_UNITS="metric"          # Optional
-    
+
 Examples:
-    $(basename "$0")                    # Use config file settings
-    $(basename "$0") --city-id 5128581   # New York
-    $(basename "$0") --units imperial    # Fahrenheit
-    $(basename "$0") --setup             # Run setup wizard
-    
+    $(basename "$0")                         # Use config file settings
+    $(basename "$0") --location 52.29,-0.60  # Rushden, UK
+    $(basename "$0") --units imperial        # Fahrenheit
+    $(basename "$0") --setup                 # Run setup wizard
+
 Get your free API key at: https://openweathermap.org/api
-Find city IDs at: https://openweathermap.org/find
-    
+
 EOF
 }
 
@@ -103,18 +103,20 @@ check_dependencies() {
 
 # Load configuration
 load_config() {
-    # Set defaults (no default city ID)
-    OPENWEATHER_CITY_ID=""
+    # Set defaults (no default location)
+    OPENWEATHER_LAT=""
+    OPENWEATHER_LON=""
     OPENWEATHER_UNITS="$DEFAULT_UNITS"
-    
+
     # Load from config file if it exists
     if [[ -f "$CONFIG_FILE" ]]; then
         source "$CONFIG_FILE"
     fi
-    
+
     # Override with environment variables if set
     OPENWEATHER_API_KEY="${OPENWEATHER_API_KEY:-}"
-    OPENWEATHER_CITY_ID="${OPENWEATHER_CITY_ID:-}"
+    OPENWEATHER_LAT="${OPENWEATHER_LAT:-}"
+    OPENWEATHER_LON="${OPENWEATHER_LON:-}"
     OPENWEATHER_UNITS="${OPENWEATHER_UNITS:-$DEFAULT_UNITS}"
 }
 
@@ -137,24 +139,25 @@ validate_api_key() {
     fi
 }
 
-# Validate city ID
-validate_city_id() {
-    if [[ -z "$OPENWEATHER_CITY_ID" ]]; then
-        log_error "No city ID found!"
+# Validate location
+validate_location() {
+    if [[ -z "$OPENWEATHER_LAT" ]] || [[ -z "$OPENWEATHER_LON" ]]; then
+        log_error "No location found!"
         echo
         echo "To fix this:"
         echo "1. Run setup wizard: $0 --setup"
-        echo "2. Or set environment variable: export OPENWEATHER_CITY_ID=your_city_id"
-        echo "3. Or add OPENWEATHER_CITY_ID=\"your_city_id\" to: $CONFIG_FILE"
-        echo "4. Or provide city ID via command line: $0 --city-id your_city_id"
-        echo
-        echo "Find city IDs at: https://openweathermap.org/find"
+        echo "2. Or set environment variables: export OPENWEATHER_LAT=52.29 OPENWEATHER_LON=-0.60"
+        echo "3. Or add to config file: $CONFIG_FILE"
+        echo "4. Or provide via command line: $0 --location 52.29,-0.60"
         exit 1
     fi
-    
-    # Basic validation (city IDs are typically numeric)
-    if [[ ! "$OPENWEATHER_CITY_ID" =~ ^[0-9]+$ ]]; then
-        log_warn "City ID format seems incorrect (expected numeric, got: $OPENWEATHER_CITY_ID)"
+
+    # Basic validation (lat/lon should be numeric)
+    if [[ ! "$OPENWEATHER_LAT" =~ ^-?[0-9]+\.?[0-9]*$ ]]; then
+        log_warn "Latitude format seems incorrect: $OPENWEATHER_LAT"
+    fi
+    if [[ ! "$OPENWEATHER_LON" =~ ^-?[0-9]+\.?[0-9]*$ ]]; then
+        log_warn "Longitude format seems incorrect: $OPENWEATHER_LON"
     fi
 }
 
@@ -162,39 +165,61 @@ validate_city_id() {
 run_setup() {
     echo -e "${GREEN}=== OpenWeatherMap Setup Wizard ===${NC}"
     echo
-    
+
     # Create config directory
     mkdir -p "$(dirname "$CONFIG_FILE")"
-    
+
     # Get API key
     echo "Get your free API key at: https://openweathermap.org/api"
     echo
     echo -n "Enter your OpenWeatherMap API key: "
     read -r api_key
-    
+
     if [[ -z "$api_key" ]]; then
         log_error "API key cannot be empty"
         exit 1
     fi
-    
-    # Get city ID (required)
+
+    # Get location by city name using geocoding API
     echo
-    echo "Find your city ID at: https://openweathermap.org/find"
-    echo -n "Enter city ID: "
-    read -r city_id
-    
-    if [[ -z "$city_id" ]]; then
-        log_error "City ID cannot be empty"
+    echo "Enter your city name (e.g., 'Rushden,UK' or 'London,GB')"
+    echo -n "City name: "
+    read -r city_name
+
+    if [[ -z "$city_name" ]]; then
+        log_error "City name cannot be empty"
         exit 1
     fi
-    
+
+    # Look up coordinates using geocoding API
+    echo "Looking up coordinates for '$city_name'..."
+    local geo_url="https://api.openweathermap.org/geo/1.0/direct?q=${city_name}&limit=1&appid=${api_key}"
+    local geo_response
+    if ! geo_response=$(curl -sf "$geo_url" 2>/dev/null); then
+        log_error "Failed to look up location. Check your API key."
+        exit 1
+    fi
+
+    local lat lon location_name country
+    lat=$(echo "$geo_response" | jq -r '.[0].lat // empty')
+    lon=$(echo "$geo_response" | jq -r '.[0].lon // empty')
+    location_name=$(echo "$geo_response" | jq -r '.[0].name // empty')
+    country=$(echo "$geo_response" | jq -r '.[0].country // empty')
+
+    if [[ -z "$lat" ]] || [[ -z "$lon" ]]; then
+        log_error "Could not find location '$city_name'. Try a different format (e.g., 'City,CountryCode')"
+        exit 1
+    fi
+
+    echo -e "${GREEN}Found: $location_name, $country (lat: $lat, lon: $lon)${NC}"
+
     # Get units (optional)
     echo
     echo "Available units: metric (°C), imperial (°F), kelvin (K)"
     echo -n "Enter units [metric]: "
     read -r units
     units="${units:-metric}"
-    
+
     # Write config file
     cat > "$CONFIG_FILE" << EOF
 # OpenWeatherMap Configuration
@@ -203,8 +228,9 @@ run_setup() {
 # Your API key from https://openweathermap.org/api
 OPENWEATHER_API_KEY="$api_key"
 
-# City ID from https://openweathermap.org/find
-OPENWEATHER_CITY_ID="$city_id"
+# Location: $location_name, $country
+OPENWEATHER_LAT="$lat"
+OPENWEATHER_LON="$lon"
 
 # Units: metric, imperial, kelvin
 OPENWEATHER_UNITS="$units"
@@ -212,22 +238,23 @@ EOF
 
     # Set secure permissions
     chmod 600 "$CONFIG_FILE"
-    
+
     echo
     echo -e "${GREEN}✅ Configuration saved to: $CONFIG_FILE${NC}"
     echo -e "${GREEN}✅ File permissions set to 600 (user read/write only)${NC}"
     echo
     echo "Testing configuration..."
-    
+
     # Test the configuration
     OPENWEATHER_API_KEY="$api_key"
-    OPENWEATHER_CITY_ID="$city_id"
+    OPENWEATHER_LAT="$lat"
+    OPENWEATHER_LON="$lon"
     OPENWEATHER_UNITS="$units"
-    
+
     if fetch_weather_data; then
         echo -e "${GREEN}✅ Configuration test successful!${NC}"
     else
-        log_error "Configuration test failed. Please check your API key and city ID."
+        log_error "Configuration test failed. Please check your API key."
         exit 1
     fi
 }
@@ -239,11 +266,11 @@ show_config() {
     echo "Cache file: $CACHE_FILE"
     echo "Cache duration: ${CACHE_DURATION}s"
     echo
-    
+
     if [[ -f "$CONFIG_FILE" ]]; then
         echo "Configuration:"
         echo "  API Key: ${OPENWEATHER_API_KEY:0:8}... (${#OPENWEATHER_API_KEY} chars)"
-        echo "  City ID: $OPENWEATHER_CITY_ID"
+        echo "  Location: lat=$OPENWEATHER_LAT, lon=$OPENWEATHER_LON"
         echo "  Units: $OPENWEATHER_UNITS"
     else
         echo "❌ No configuration file found at: $CONFIG_FILE"
@@ -257,22 +284,22 @@ is_cache_valid() {
     [[ $(($(date +%s) - $(stat -c %Y "$CACHE_FILE" 2>/dev/null || echo 0))) -lt $CACHE_DURATION ]]
 }
 
-# Fetch weather data from API
+# Fetch weather data from API (using forecast for rain probability)
 fetch_weather_data() {
-    local url="https://api.openweathermap.org/data/2.5/weather?id=${OPENWEATHER_CITY_ID}&units=${OPENWEATHER_UNITS}&appid=${OPENWEATHER_API_KEY}"
-    
+    local url="https://api.openweathermap.org/data/2.5/forecast?lat=${OPENWEATHER_LAT}&lon=${OPENWEATHER_LON}&units=${OPENWEATHER_UNITS}&appid=${OPENWEATHER_API_KEY}&cnt=1"
+
     local response
     if ! response=$(curl -sf "$url" 2>/dev/null); then
         log_error "Failed to fetch weather data from API"
         return 1
     fi
-    
+
     # Validate JSON response
     if ! echo "$response" | jq . >/dev/null 2>&1; then
         log_error "Invalid JSON response from API"
         return 1
     fi
-    
+
     # Check for API error
     local api_code
     api_code=$(echo "$response" | jq -r '.cod // empty')
@@ -282,11 +309,11 @@ fetch_weather_data() {
         log_error "API Error ($api_code): $api_message"
         return 1
     fi
-    
+
     # Cache the response
     mkdir -p "$CACHE_DIR"
     echo "$response" > "$CACHE_FILE"
-    
+
     return 0
 }
 
@@ -320,17 +347,20 @@ get_wind_direction() {
     echo "${directions[$index]}"
 }
 
-# Get weather icon
-get_weather_icon() {
+# Get weather text description
+get_weather_text() {
     local condition="$1"
     case "$condition" in
-        'Clear')        echo "☀" ;;  # Clear sky
-        'Clouds')       echo "☁" ;;  # Cloudy
-        'Rain'|'Drizzle') echo "🌧" ;;  # Rain
-        'Snow')         echo "❄" ;;  # Snow
-        'Thunderstorm') echo "⛈" ;;  # Thunder
-        'Mist'|'Fog')   echo "🌫" ;;  # Fog
-        *)              echo "🌤" ;;  # Default
+        'Clear')        echo "Clear" ;;
+        'Clouds')       echo "Cloudy" ;;
+        'Rain')         echo "Rain" ;;
+        'Drizzle')      echo "Drizzle" ;;
+        'Snow')         echo "Snow" ;;
+        'Thunderstorm') echo "Storm" ;;
+        'Mist')         echo "Mist" ;;
+        'Fog')          echo "Fog" ;;
+        'Haze')         echo "Haze" ;;
+        *)              echo "$condition" ;;
     esac
 }
 
@@ -352,36 +382,30 @@ safe_printf() {
 # Format weather output
 format_weather() {
     local weather_data="$1"
-    
-    # Parse weather data with error checking
-    local condition temp wind_speed_ms wind_deg
-    condition=$(echo "$weather_data" | jq -r '.weather[0].main // "Unknown"')
-    temp=$(echo "$weather_data" | jq -r '.main.temp // "0"')
-    wind_speed_ms=$(echo "$weather_data" | jq -r '.wind.speed // "0"')
-    wind_deg=$(echo "$weather_data" | jq -r '.wind.deg // "0"')
-    
+
+    # Parse forecast data (first item in list)
+    local condition temp pop
+    condition=$(echo "$weather_data" | jq -r '.list[0].weather[0].main // "Unknown"')
+    temp=$(echo "$weather_data" | jq -r '.list[0].main.temp // "0"')
+    pop=$(echo "$weather_data" | jq -r '.list[0].pop // "0"')
+
     # Validate parsed data
     [[ "$condition" == "null" ]] && condition="Unknown"
     [[ "$temp" == "null" ]] && temp="0"
-    [[ "$wind_speed_ms" == "null" ]] && wind_speed_ms="0"
-    [[ "$wind_deg" == "null" ]] && wind_deg="0"
-    
+    [[ "$pop" == "null" ]] && pop="0"
+
     # Format temperature with safe formatting
     local temp_formatted
-    temp_formatted=$(safe_printf "%.1f" "$temp")
-    
-    # Convert wind speed to km/h with safe formatting
-    local wind_speed_kmh
-    wind_speed_kmh=$(awk "BEGIN {printf \"%.1f\", ($wind_speed_ms + 0) * 3.6}")
-    
-    # Get wind direction
-    local wind_dir
-    wind_dir=$(get_wind_direction "$wind_deg")
-    
-    # Get weather icon
-    local icon
-    icon=$(get_weather_icon "$condition")
-    
+    temp_formatted=$(safe_printf "%.0f" "$temp")
+
+    # Convert pop to percentage
+    local rain_pct
+    rain_pct=$(awk "BEGIN {printf \"%.0f\", $pop * 100}")
+
+    # Get weather text description
+    local weather_text
+    weather_text=$(get_weather_text "$condition")
+
     # Format unit symbol
     local unit_symbol
     case "$OPENWEATHER_UNITS" in
@@ -389,18 +413,18 @@ format_weather() {
         "kelvin")   unit_symbol="K" ;;
         *)          unit_symbol="°C" ;;
     esac
-    
+
     # Output formatted weather
-    echo "${icon} ${temp_formatted}${unit_symbol}, ${wind_speed_kmh} km/h ${wind_dir}"
+    echo "${temp_formatted}${unit_symbol}, ${rain_pct}% rain"
 }
 
 # Main function
 main() {
-    local city_id_override=""
+    local location_override=""
     local api_key_override=""
     local units_override=""
     local force_refresh="false"
-    
+
     # Parse command line arguments
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -408,8 +432,8 @@ main() {
                 show_help
                 exit 0
                 ;;
-            -c|--city-id)
-                city_id_override="$2"
+            -l|--location)
+                location_override="$2"
                 shift 2
                 ;;
             -k|--api-key)
@@ -441,22 +465,25 @@ main() {
                 ;;
         esac
     done
-    
+
     # Check dependencies
     check_dependencies
-    
+
     # Load configuration
     load_config
-    
+
     # Apply overrides
-    [[ -n "$city_id_override" ]] && OPENWEATHER_CITY_ID="$city_id_override"
+    if [[ -n "$location_override" ]]; then
+        OPENWEATHER_LAT="${location_override%%,*}"
+        OPENWEATHER_LON="${location_override##*,}"
+    fi
     [[ -n "$api_key_override" ]] && OPENWEATHER_API_KEY="$api_key_override"
     [[ -n "$units_override" ]] && OPENWEATHER_UNITS="$units_override"
-    
+
     # Validate configuration
     validate_api_key
-    validate_city_id
-    
+    validate_location
+
     # Get and format weather data
     local weather_data
     if weather_data=$(get_weather_data "$force_refresh"); then

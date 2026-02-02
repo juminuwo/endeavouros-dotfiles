@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+
+# Weather block for i3blocks
+# - Left click: force refresh
+# - Right click: open forecast in browser
+
+SCRIPT_DIR="$(dirname "$0")"
+CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/openweather/config"
+
+# Load lat/lon from config
+source "$CONFIG_FILE"
+
+case $BLOCK_BUTTON in
+    1)  # Left click - force refresh
+        "$SCRIPT_DIR/openweather" --force-refresh
+        ;;
+    3)  # Right click - open forecast in browser
+        xdg-open "https://openweathermap.org/city/${OPENWEATHER_LOCATION_ID}" &
+        "$SCRIPT_DIR/openweather"
+        ;;
+    *)  # Default - show current weather
+        "$SCRIPT_DIR/openweather"
+        ;;
+esac
