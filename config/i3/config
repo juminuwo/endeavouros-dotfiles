@@ -445,7 +445,6 @@ exec --no-startup-id dex --autostart --environment i3
 exec --no-startup-id gnome-keyring-daemon --start --components=secrets
 
 # set wallpaper
-exec --no-startup-id sleep 2 && nitrogen --restore
 exec --no-startup-id sleep 1 && feh --bg-center /usr/share/endeavouros/backgrounds/eos_wallpapers_community/endeavour_pillarsofcreation.png
 
 # set powersavings for display:
