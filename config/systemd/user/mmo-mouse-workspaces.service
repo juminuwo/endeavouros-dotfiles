@@ -1,0 +1,12 @@
+[Unit]
+Description=MMO mouse side buttons to i3 workspace switcher
+After=graphical-session.target
+
+[Service]
+Environment=DISPLAY=:0
+ExecStart=/home/howis/git/endeavouros-dotfiles/config/i3/scripts/mmo-mouse-workspaces.py
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

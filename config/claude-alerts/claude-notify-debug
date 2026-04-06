@@ -1,0 +1,36 @@
+#!/bin/bash
+
+# Claude notification script for Linux (i3/EndeavourOS)
+# Displays a desktop notification and plays a sound
+
+# Get the message from environment variable or use default
+MESSAGE="${message:-Claude Code Notification}"
+
+# Display notification using notify-send
+if command -v notify-send &> /dev/null; then
+    notify-send -u normal -t 5000 "Claude Code" "$MESSAGE"
+fi
+
+# Play notification sound
+# Using system message sound or beep
+SOUND_FILE="/usr/share/sounds/freedesktop/stereo/message.oga"
+
+if [ -f "$SOUND_FILE" ]; then
+    # Try paplay (PulseAudio) first
+    if command -v paplay &> /dev/null; then
+        paplay "$SOUND_FILE" &
+    # Try mpv as fallback
+    elif command -v mpv &> /dev/null; then
+        mpv --no-video --really-quiet "$SOUND_FILE" &
+    # Try ffplay as fallback
+    elif command -v ffplay &> /dev/null; then
+        ffplay -nodisp -autoexit -loglevel quiet "$SOUND_FILE" &
+    fi
+else
+    # If no sound file, use PC speaker beep as last resort
+    if command -v paplay &> /dev/null; then
+        paplay /usr/share/sounds/freedesktop/stereo/bell.oga &> /dev/null &
+    elif command -v beep &> /dev/null; then
+        beep &
+    fi
+fi

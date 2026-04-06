@@ -1,0 +1,15 @@
+#!/bin/bash
+# Install packages from curated lists (skips comments and blank lines)
+set -e
+
+BASEDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_LIST="$BASEDIR/config/packages-repo.txt"
+AUR_LIST="$BASEDIR/config/packages-aur.txt"
+
+echo "Installing repo packages..."
+grep -v '^#\|^$' "$REPO_LIST" | sudo pacman -S --needed --noconfirm -
+
+echo "Installing AUR packages..."
+grep -v '^#\|^$' "$AUR_LIST" | yay -S --needed --noconfirm -
+
+echo "Done."

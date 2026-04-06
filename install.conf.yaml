@@ -17,6 +17,16 @@
     ~/.claude/keybindings.json: config/claude-keybindings.json
     ~/.claude/skills/research-first: config/claude-skills/research-first
     ~/.claude/skills/update-projects: config/claude-skills/update-projects
+    ~/.config/kitty/current-theme.conf: config/kitty-current-theme.conf
+    ~/.config/systemd/user/mmo-mouse-workspaces.service: config/systemd/user/mmo-mouse-workspaces.service
+    ~/.gitconfig: config/gitconfig
+    ~/.config/git/ignore: config/gitignore-global
+    ~/.ssh/config:
+      path: config/ssh-config
+      create: true
+    ~/git/CLAUDE.md: config/CLAUDE.md
+    ~/bin/clip-img: config/clip-img
+    ~/bin/claude-notify-debug: config/claude-alerts/claude-notify-debug
 
 - shell:
   - [git submodule update --init --recursive, Installing submodules]

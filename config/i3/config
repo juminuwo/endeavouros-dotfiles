@@ -304,6 +304,9 @@ bindsym XF86AudioPrev exec --no-startup-id playerctl previous
 # bindsym Print exec --no-startup-id scrot ~/%Y-%m-%d-%T-screenshot.png && notify-send "Screenshot saved to ~/$(date +"%Y-%m-%d-%T")-screenshot.png"
 bindsym Print exec flameshot gui
 
+# Save clipboard image to file for pasting into Claude Code
+bindsym $mod+Shift+v exec --no-startup-id ~/bin/clip-img
+
 # Power Profiles menu switcher (rofi)
 # bindsym $mod+Shift+p exec --no-startup-id ~/.config/i3/scripts/power-profiles
 
@@ -484,8 +487,12 @@ exec --no-startup-id /usr/bin/dunst
 #exec --no-startup-id sleep 7 && firefox https://github.com/endeavouros-team/endeavouros-i3wm-setup/blob/main/force-knowledge.md
 #exec --no-startup-id sleep 3 && thunar
 exec --no-startup-id tailscale-systray
-exec --no-startup-id caffeine
+# caffeine-ng auto-starts via /etc/xdg/autostart/caffeine.desktop
+#exec --no-startup-id caffeine
 exec --no-startup-id fcitx5 -d
+exec --no-startup-id picom
+exec --no-startup-id xmousepasteblock
+exec --no-startup-id soundwire-tray
 
 
 ## system tray

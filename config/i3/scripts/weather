@@ -15,7 +15,7 @@ case $BLOCK_BUTTON in
         "$SCRIPT_DIR/openweather" --force-refresh
         ;;
     3)  # Right click - open forecast in browser
-        xdg-open "https://openweathermap.org/city/${OPENWEATHER_LOCATION_ID}" &
+        xdg-open "https://weather.metoffice.gov.uk/forecast/gcr96qggy#?nearestTo=NN10%20(United%20Kingdom)" &
         "$SCRIPT_DIR/openweather"
         ;;
     *)  # Default - show current weather
