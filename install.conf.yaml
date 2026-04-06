@@ -27,6 +27,9 @@
     ~/git/CLAUDE.md: config/CLAUDE.md
     ~/bin/clip-img: config/clip-img
     ~/bin/claude-notify-debug: config/claude-alerts/claude-notify-debug
+    ~/.config/picom/picom.conf: config/picom.conf
+    ~/.config/fcitx5/profile: config/fcitx5/profile
+    ~/.config/fcitx5/config: config/fcitx5/config
 
 - shell:
   - [git submodule update --init --recursive, Installing submodules]
