@@ -65,18 +65,28 @@ handle_click() {
         recording)
             local choice
             choice=$(printf 'stop\ncancel' | menu_pick "Recording")
-            if [ "${choice:-}" = "stop" ]; then
-                set_state processing
-                setsid -f bash -c "
-                    if '$SCRIBE' stop >>'$LOG_FILE' 2>&1; then
-                        notify-send 'meeting-scribe' 'Notes generated'
+            case "${choice:-}" in
+                stop)
+                    set_state processing
+                    setsid -f bash -c "
+                        if '$SCRIBE' stop >>'$LOG_FILE' 2>&1; then
+                            notify-send 'meeting-scribe' 'Notes generated'
+                        else
+                            notify-send -u critical 'meeting-scribe' 'Stop failed (see $LOG_FILE)'
+                        fi
+                        echo idle > '$STATE_FILE'
+                        pkill -RTMIN+${BLOCK_SIGNAL} i3blocks 2>/dev/null || true
+                    "
+                    ;;
+                cancel)
+                    if "$SCRIBE" cancel >>"$LOG_FILE" 2>&1; then
+                        notify-send "meeting-scribe" "Recording cancelled"
                     else
-                        notify-send -u critical 'meeting-scribe' 'Stop failed (see $LOG_FILE)'
+                        notify-send -u critical "meeting-scribe" "Cancel failed (see $LOG_FILE)"
                     fi
-                    echo idle > '$STATE_FILE'
-                    pkill -RTMIN+${BLOCK_SIGNAL} i3blocks 2>/dev/null || true
-                "
-            fi
+                    set_state idle
+                    ;;
+            esac
             ;;
         processing)
             notify-send "meeting-scribe" "Already processing — please wait"
