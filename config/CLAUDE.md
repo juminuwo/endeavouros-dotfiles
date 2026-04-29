@@ -38,6 +38,9 @@
 - **predictive-maintenance** — Predictive maintenance project
 - **endeavouros-dotfiles** — System dotfiles
 
+## Laptop Setup
+- For laptops, uncomment the `[battery]` block in `config/i3/i3blocks.conf` (line ~144) and its `command=` line to show battery level in the i3 status bar. Requires `acpi` package.
+
 ## Project Ideas (Obsidian Vault)
 - **Driver Shield 360** — 360° camera system for delivery driver protection (Pi 5 + commodity cameras)
 - **Shipping Spend Intelligence** — Shopify app for UK e-commerce shipping cost analysis

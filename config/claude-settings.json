@@ -43,7 +43,8 @@
       "Bash(docker ps *)",
       "Bash(docker logs *)",
       "Bash(gh *)"
-    ]
+    ],
+    "defaultMode": "auto"
   },
   "hooks": {
     "Notification": [
@@ -103,5 +104,8 @@
   },
   "alwaysThinkingEnabled": true,
   "effortLevel": "high",
-  "skipDangerousModePermissionPrompt": true
+  "skipDangerousModePermissionPrompt": true,
+  "skipAutoPermissionPrompt": true,
+  "theme": "dark-daltonized",
+  "agentPushNotifEnabled": true
 }
