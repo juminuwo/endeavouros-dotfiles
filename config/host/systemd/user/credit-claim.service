@@ -1,0 +1,6 @@
+[Unit]
+Description=Daily credit claim
+
+[Service]
+Type=oneshot
+ExecStart=/home/howis/git/endeavouros-dotfiles/config/host/credit-claim/claim.sh

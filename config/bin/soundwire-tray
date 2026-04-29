@@ -1,0 +1,23 @@
+#!/bin/bash
+
+start_server() {
+    pkill -f "xvfb-run.*SoundWireServer" 2>/dev/null
+    sleep 0.5
+    pactl set-default-source alsa_output.pci-0000_00_1f.3.analog-stereo.monitor
+    xvfb-run SoundWireServer &
+}
+
+stop_server() {
+    pkill -f "xvfb-run.*SoundWireServer" 2>/dev/null
+    pkill -f SoundWireServer 2>/dev/null
+}
+
+export -f start_server stop_server
+
+start_server
+
+exec yad --notification \
+    --image=audio-card \
+    --text="SoundWire Server" \
+    --menu="Restart!bash -c start_server|Quit!quit" \
+    --command="bash -c start_server"

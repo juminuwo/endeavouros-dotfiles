@@ -1,0 +1,18 @@
+[Unit]
+Description=External Drive Sync Service
+Documentation=file:///home/howis/git/endeavouros-dotfiles/config/host/DRIVE-SYNC-SETUP.md
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/howis/git/endeavouros-dotfiles/config/host/sync-drives.sh
+User=root
+Group=root
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=drive-sync
+
+PrivateTmp=true
+
+Restart=no

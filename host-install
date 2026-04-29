@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Installs host-specific systemd units that dotbot can't manage:
+#   - /etc/systemd/system/drive-sync.{service,timer}   (system, root)
+#   - ~/.config/systemd/user/credit-claim.{service,timer}  (user)
+#
+# Idempotent: safe to re-run after editing the unit files in this repo.
+
+set -euo pipefail
+
+BASEDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SYS_SRC="$BASEDIR/config/host/systemd/system"
+USER_SRC="$BASEDIR/config/host/systemd/user"
+USER_DST="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+
+say() { printf '\n=== %s ===\n' "$*"; }
+
+# ------------------------------------------------------------------
+# System units (drive-sync) — needs sudo
+# ------------------------------------------------------------------
+say "Installing system units (drive-sync) — sudo required"
+
+sudo install -m 644 "$SYS_SRC/drive-sync.service" /etc/systemd/system/drive-sync.service
+sudo install -m 644 "$SYS_SRC/drive-sync.timer"   /etc/systemd/system/drive-sync.timer
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now drive-sync.timer
+
+# ------------------------------------------------------------------
+# User units (credit-claim)
+# ------------------------------------------------------------------
+say "Installing user units (credit-claim)"
+
+mkdir -p "$USER_DST"
+install -m 644 "$USER_SRC/credit-claim.service" "$USER_DST/credit-claim.service"
+install -m 644 "$USER_SRC/credit-claim.timer"   "$USER_DST/credit-claim.timer"
+
+systemctl --user daemon-reload
+systemctl --user enable --now credit-claim.timer
+
+# ------------------------------------------------------------------
+# Verify
+# ------------------------------------------------------------------
+say "Verifying timer status"
+systemctl list-timers --all --no-pager | grep -E 'drive-sync|credit-claim' || true
+systemctl --user list-timers --all --no-pager | grep -E 'credit-claim' || true
+
+say "Done."

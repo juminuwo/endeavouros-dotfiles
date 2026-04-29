@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily credit claim trigger
+
+[Timer]
+OnCalendar=*-*-* 22:13:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
