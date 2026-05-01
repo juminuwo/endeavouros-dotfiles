@@ -307,6 +307,9 @@ bindsym Print exec flameshot gui
 # Save clipboard image to file for pasting into Claude Code
 bindsym $mod+Shift+v exec --no-startup-id ~/bin/clip-img
 
+# Paste clipboard with common leading whitespace stripped (for Claude Code / TUI output)
+bindsym Control+Shift+$mod+v exec --no-startup-id ~/bin/paste-dedented
+
 # Power Profiles menu switcher (rofi)
 # bindsym $mod+Shift+p exec --no-startup-id ~/.config/i3/scripts/power-profiles
 

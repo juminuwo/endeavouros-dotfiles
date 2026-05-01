@@ -16,6 +16,7 @@ polkit-gnome
 nwg-look
 xbindkeys
 xclip
+xdotool
 xsel
 xorg-server
 xorg-server-xvfb
