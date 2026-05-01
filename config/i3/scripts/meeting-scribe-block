@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # i3blocks block for meeting-scribe.
 #
-# Renders an emoji based on the recording state.
-# Right-click while idle      -> rofi/dmenu picker (default / 1on1) -> start
-# Right-click while recording -> rofi/dmenu (stop / cancel)         -> stop pipeline
-# Right-click while processing -> notify (busy)
+# Renders an emoji based on the recording state. When crashed recordings
+# (ffmpeg died without `stop` being pressed) are queued, the idle glyph
+# changes to ⚠ and the right-click menu offers Record / Process crashed.
+#
+# Right-click while idle (no crashed)     -> template picker -> start
+# Right-click while idle (crashed queued) -> Record | Process crashed (N) -> submenu
+# Right-click while recording             -> stop / cancel
+# Right-click while processing            -> notify (busy)
 #
 # State changes signal i3blocks (SIGRTMIN+14) so the bar redraws immediately
 # instead of waiting for the next interval.
@@ -50,16 +54,84 @@ menu_pick() {
     fi
 }
 
+# Returns the JSON list from `meeting-scribe crashed --json`, or "[]" on error.
+# Memoised within a single block invocation so the click handler and the
+# glyph render don't both spawn a Python interpreter.
+_CRASHED_JSON_CACHE=""
+crashed_json() {
+    if [ -z "$_CRASHED_JSON_CACHE" ]; then
+        _CRASHED_JSON_CACHE=$("$SCRIBE" crashed --json 2>>"$LOG_FILE" || echo "[]")
+    fi
+    printf '%s' "$_CRASHED_JSON_CACHE"
+}
+
+crashed_count() {
+    crashed_json | jq 'length'
+}
+
+start_recording() {
+    local choice
+    choice=$(printf 'default\n1on1' | menu_pick "Template")
+    [ -z "${choice:-}" ] && return 0
+    if "$SCRIBE" start --template "$choice" >>"$LOG_FILE" 2>&1; then
+        set_state recording
+    else
+        notify-send -u critical "meeting-scribe" "Start failed (see $LOG_FILE)"
+    fi
+}
+
+# Build human-readable rows for the crashed submenu.
+# Format: "<session-id> — <slug> (Xm)"; the id is the first whitespace token.
+process_crashed_menu() {
+    local rows choice id
+    rows=$(crashed_json | jq -r \
+        '.[] | "\(.id) — \(.slug) (\(.duration_seconds / 60 | floor)m)"')
+    if [ -z "$rows" ]; then
+        notify-send "meeting-scribe" "No crashed recordings"
+        return 0
+    fi
+    choice=$(printf '%s\nProcess all' "$rows" | menu_pick "Process crashed")
+    [ -z "${choice:-}" ] && return 0
+
+    set_state processing
+    if [ "$choice" = "Process all" ]; then
+        setsid -f bash -c "
+            if '$SCRIBE' recover --all >>'$LOG_FILE' 2>&1; then
+                notify-send 'meeting-scribe' 'Crashed recordings recovered'
+            else
+                notify-send -u critical 'meeting-scribe' 'Recover failed (see $LOG_FILE)'
+            fi
+            echo idle > '$STATE_FILE'
+            pkill -RTMIN+${BLOCK_SIGNAL} i3blocks 2>/dev/null || true
+        " </dev/null >/dev/null 2>&1
+    else
+        id="${choice%% *}"
+        setsid -f bash -c "
+            if '$SCRIBE' recover '$id' >>'$LOG_FILE' 2>&1; then
+                notify-send 'meeting-scribe' 'Recovered $id'
+            else
+                notify-send -u critical 'meeting-scribe' 'Recover failed (see $LOG_FILE)'
+            fi
+            echo idle > '$STATE_FILE'
+            pkill -RTMIN+${BLOCK_SIGNAL} i3blocks 2>/dev/null || true
+        " </dev/null >/dev/null 2>&1
+    fi
+}
+
 handle_click() {
     case "$(current_state)" in
         idle)
-            local choice
-            choice=$(printf 'default\n1on1' | menu_pick "Template")
-            [ -z "${choice:-}" ] && return 0
-            if "$SCRIBE" start --template "$choice" >>"$LOG_FILE" 2>&1; then
-                set_state recording
+            local count choice
+            count=$(crashed_count)
+            if [ "$count" -gt 0 ]; then
+                choice=$(printf 'Record\nProcess crashed (%s)' "$count" \
+                    | menu_pick "meeting-scribe")
+                case "${choice:-}" in
+                    Record) start_recording ;;
+                    "Process crashed"*) process_crashed_menu ;;
+                esac
             else
-                notify-send -u critical "meeting-scribe" "Start failed (see $LOG_FILE)"
+                start_recording
             fi
             ;;
         recording)
@@ -76,7 +148,7 @@ handle_click() {
                         fi
                         echo idle > '$STATE_FILE'
                         pkill -RTMIN+${BLOCK_SIGNAL} i3blocks 2>/dev/null || true
-                    "
+                    " </dev/null >/dev/null 2>&1
                     ;;
                 cancel)
                     if "$SCRIBE" cancel >>"$LOG_FILE" 2>&1; then
@@ -99,8 +171,15 @@ case "${BLOCK_BUTTON:-0}" in
 esac
 
 reconcile_state
-case "$(current_state)" in
+state="$(current_state)"
+case "$state" in
     recording) echo "🔴" ;;
     processing) echo "⏳" ;;
-    *)         echo "🎙" ;;
+    *)
+        if [ "$(crashed_count)" -gt 0 ]; then
+            echo "⚠"
+        else
+            echo "🎙"
+        fi
+        ;;
 esac
