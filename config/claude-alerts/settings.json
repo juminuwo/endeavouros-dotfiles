@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "message='Claude Code needs permission' /home/howis/bin/claude-notify-debug"
+            "command": "message='Claude Code needs permission' /home/howis/bin/claude-notify"
           }
         ]
       },
@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "message='Claude is waiting for input' /home/howis/bin/claude-notify-debug"
+            "command": "message='Claude is waiting for input' /home/howis/bin/claude-notify"
           }
         ]
       }
@@ -26,7 +26,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "message='Subtask completed' /home/howis/bin/claude-notify-debug"
+            "command": "message='Subtask completed' /home/howis/bin/claude-notify"
           }
         ]
       }
@@ -37,7 +37,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "message='Claude finished' /home/howis/bin/claude-notify-debug"
+            "command": "message='Claude finished' /home/howis/bin/claude-notify"
           }
         ]
       }

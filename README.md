@@ -31,7 +31,7 @@ Driven by `install.conf.yaml`. Creates symlinks from `~` into `config/`, replaci
 | zsh, X11, git | `~/.zshrc`, `~/.xprofile`, `~/.Xmodmap`, `~/.gitconfig`, `~/.config/git/ignore` |
 | SSH client config | `~/.ssh/config` |
 | Claude (settings, keybindings, skills) | `~/.claude/{settings.json,keybindings.json,skills/*}` |
-| User scripts in PATH | `~/bin/{clip-img,claude-notify-debug}`, `~/.local/bin/{restore_i3_session,save_i3_session,soundwire-tray}` |
+| User scripts in PATH | `~/bin/{clip-img,claude-notify}`, `~/.local/bin/{restore_i3_session,save_i3_session,soundwire-tray}` |
 | User systemd unit | `~/.config/systemd/user/mmo-mouse-workspaces.service` (started automatically by systemd once enabled) |
 | Top-level repo CLAUDE.md | `~/git/CLAUDE.md` |
 

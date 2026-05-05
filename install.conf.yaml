@@ -27,7 +27,7 @@
     ~/git/CLAUDE.md: config/CLAUDE.md
     ~/bin/clip-img: config/clip-img
     ~/bin/paste-dedented: config/paste-dedented
-    ~/bin/claude-notify-debug: config/claude-alerts/claude-notify-debug
+    ~/bin/claude-notify: config/claude-alerts/claude-notify
     ~/.local/bin/restore_i3_session.sh: config/bin/restore_i3_session.sh
     ~/.local/bin/save_i3_session.sh: config/bin/save_i3_session.sh
     ~/.local/bin/soundwire-tray: config/bin/soundwire-tray
