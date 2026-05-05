@@ -8,6 +8,36 @@
 
 LOG="/tmp/claude-dashboard-spawn.log"
 
+# Read the hook payload (JSON on stdin) so we can record the
+# claude_pid -> session_id mapping the dashboard uses to disambiguate
+# multiple sessions in the same cwd.
+payload=$(cat 2>/dev/null || true)
+session_id=""
+if [ -n "$payload" ]; then
+  session_id=$(printf '%s' "$payload" | jq -r '.session_id // empty' 2>/dev/null || true)
+fi
+
+# Walk up the process tree to find the parent `claude` process.
+claude_pid=""
+walk_pid=$$
+while [ "${walk_pid:-0}" -gt 1 ]; do
+  ppid=$(awk '{print $4}' "/proc/$walk_pid/stat" 2>/dev/null) || break
+  [ -n "${ppid:-}" ] && [ "$ppid" -gt 1 ] || break
+  comm=$(cat "/proc/$ppid/comm" 2>/dev/null) || break
+  if [ "$comm" = "claude" ]; then
+    claude_pid="$ppid"
+    break
+  fi
+  walk_pid="$ppid"
+done
+
+# Record the mapping for the dashboard to consume.
+if [ -n "$claude_pid" ] && [ -n "$session_id" ]; then
+  mkdir -p /tmp/claude-sessions 2>/dev/null
+  printf '%s\n' "$session_id" > "/tmp/claude-sessions/$claude_pid"
+  echo "$(date -Iseconds) recorded pid=$claude_pid -> session=$session_id" >>"$LOG"
+fi
+
 [ -n "${KITTY_LISTEN_ON:-}" ] || { echo "$(date -Iseconds) no KITTY_LISTEN_ON" >>"$LOG"; exit 0; }
 [ -n "${KITTY_WINDOW_ID:-}" ] || { echo "$(date -Iseconds) no KITTY_WINDOW_ID" >>"$LOG"; exit 0; }
 

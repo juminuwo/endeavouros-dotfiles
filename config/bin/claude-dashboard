@@ -32,6 +32,7 @@ from textual.reactive import reactive
 from textual.widgets import Footer, Header, Static
 
 PROJECTS_DIR = Path.home() / ".claude" / "projects"
+SESSIONS_DIR = Path("/tmp") / "claude-sessions"
 REFRESH_SECONDS = 2.0
 TAIL_BYTES = 200_000
 KITTY_TIMEOUT = 2.0
@@ -113,7 +114,24 @@ def encode_cwd(path: str) -> str:
     return path.replace("/", "-")
 
 
-def find_session_jsonl(cwd: str) -> Path | None:
+def session_id_for_pid(pid: int) -> str | None:
+    """Look up the session-id recorded by the SessionStart hook for this pid."""
+    f = SESSIONS_DIR / str(pid)
+    if not f.is_file():
+        return None
+    try:
+        return f.read_text().strip() or None
+    except OSError:
+        return None
+
+
+def find_session_jsonl_by_id(cwd: str, session_id: str) -> Path | None:
+    j = PROJECTS_DIR / encode_cwd(cwd) / f"{session_id}.jsonl"
+    return j if j.is_file() else None
+
+
+def find_session_jsonl_fallback(cwd: str) -> Path | None:
+    """Most recently modified JSONL in this cwd. Used when no pid mapping exists."""
     pd = PROJECTS_DIR / encode_cwd(cwd)
     if not pd.exists():
         return None
@@ -123,8 +141,31 @@ def find_session_jsonl(cwd: str) -> Path | None:
     return max(jsonls, key=lambda p: p.stat().st_mtime)
 
 
+def cleanup_stale_session_files() -> None:
+    """Drop pid->session mappings for processes that no longer exist."""
+    if not SESSIONS_DIR.exists():
+        return
+    try:
+        entries = list(SESSIONS_DIR.iterdir())
+    except OSError:
+        return
+    for f in entries:
+        if not f.is_file():
+            continue
+        try:
+            pid = int(f.name)
+        except ValueError:
+            continue
+        if not Path(f"/proc/{pid}").exists():
+            try:
+                f.unlink()
+            except OSError:
+                pass
+
+
 def find_claude_tabs():
-    seen: set[Path] = set()
+    cleanup_stale_session_files()
+    seen_pids: set[int] = set()
     for osw in kitty_ls():
         for tab in osw.get("tabs", []):
             for win in tab.get("windows", []):
@@ -132,15 +173,30 @@ def find_claude_tabs():
                     if not is_claude_process(proc):
                         continue
                     pid = proc.get("pid")
-                    cwd = proc_cwd(pid) if pid else None
-                    cwd = cwd or win.get("cwd", "")
+                    if not pid or pid in seen_pids:
+                        continue
+                    cwd = proc_cwd(pid) or win.get("cwd", "")
                     if not cwd:
                         continue
-                    j = find_session_jsonl(cwd)
-                    if not j or j in seen:
-                        continue
-                    seen.add(j)
-                    yield {"tab_id": tab["id"], "cwd": cwd, "jsonl": j}
+                    jsonl: Path | None = None
+                    sid = session_id_for_pid(pid)
+                    if sid:
+                        # Trust the hook mapping. If the session hasn't written
+                        # its JSONL yet (brand-new claude with no messages), we
+                        # show the card with no content — don't fall back to
+                        # the newest-in-cwd file or we'd lie about its state.
+                        jsonl = find_session_jsonl_by_id(cwd, sid)
+                    else:
+                        # No mapping recorded (session predates the hook).
+                        jsonl = find_session_jsonl_fallback(cwd)
+                    seen_pids.add(pid)
+                    yield {
+                        "tab_id": tab["id"],
+                        "cwd": cwd,
+                        "jsonl": jsonl,
+                        "session_id": sid,
+                        "pid": pid,
+                    }
                     break
 
 
@@ -231,13 +287,24 @@ def truncate(s: str, n: int) -> str:
 def gather_sessions() -> list[dict]:
     out = []
     for tab in find_claude_tabs():
-        s = session_summary(tab["jsonl"])
+        if tab["jsonl"]:
+            s = session_summary(tab["jsonl"])
+            fresh = False
+        else:
+            s = {
+                "last_user": "",
+                "last_assistant": "",
+                "last_tool": "",
+                "mtime": time.time(),
+            }
+            fresh = True
         out.append(
             {
                 "tab_id": tab["tab_id"],
                 "project": Path(tab["cwd"]).name or tab["cwd"],
                 "cwd": tab["cwd"],
                 "summary": s,
+                "fresh": fresh,
             }
         )
     return out
@@ -245,10 +312,17 @@ def gather_sessions() -> list[dict]:
 
 def render_card(session: dict) -> Group:
     sm = session["summary"]
-    label, dot, style = status_for(sm["mtime"])
-    age = fmt_age(sm["mtime"])
-    activity = sm["last_tool"] or sm["last_assistant"] or "—"
-    prompt = sm["last_user"] or "(no prompt yet)"
+    fresh = session.get("fresh", False)
+
+    if fresh:
+        label, dot, style = ("new", "○", "bold #b89eff")
+        age = "just started"
+    else:
+        label, dot, style = status_for(sm["mtime"])
+        age = fmt_age(sm["mtime"])
+
+    activity = sm["last_tool"] or sm["last_assistant"] or ("—" if not fresh else "waiting for first prompt")
+    prompt = sm["last_user"] or ("(no messages yet)" if fresh else "(no prompt yet)")
 
     # Top row: project (left) + status dot+label (right)
     top = Table.grid(expand=True, padding=(0, 0))
@@ -260,15 +334,14 @@ def render_card(session: dict) -> Group:
     status_text.append(label, style=style)
     top.add_row(project_text, status_text)
 
-    # Middle row: last user prompt
-    middle = Text(f"“{truncate(prompt, 200)}”", style="italic #b8b8b8")
+    middle_style = "italic dim #888888" if fresh else "italic #b8b8b8"
+    middle = Text(f"“{truncate(prompt, 200)}”", style=middle_style)
 
-    # Bottom row: activity (left) + age (right)
     bottom = Table.grid(expand=True, padding=(0, 0))
     bottom.add_column(ratio=1)
     bottom.add_column(justify="right")
     bottom.add_row(
-        Text(truncate(activity, 80), style="#7ec8ff"),
+        Text(truncate(activity, 80), style="dim #909090" if fresh else "#7ec8ff"),
         Text(age, style="dim #909090"),
     )
 
