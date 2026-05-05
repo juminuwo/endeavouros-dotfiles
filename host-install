@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Installs host-specific systemd units that dotbot can't manage:
-#   - /etc/systemd/system/drive-sync.{service,timer}   (system, root)
-#   - ~/.config/systemd/user/credit-claim.{service,timer}  (user)
+#   - /etc/systemd/system/drive-sync.{service,timer}            (system, root)
+#   - ~/.config/systemd/user/credit-claim.{service,timer}       (user)
+#   - ~/.config/systemd/user/imoto-wiki-publish.{service,timer} (user)
 #
 # Idempotent: safe to re-run after editing the unit files in this repo.
 
@@ -38,10 +39,21 @@ systemctl --user daemon-reload
 systemctl --user enable --now credit-claim.timer
 
 # ------------------------------------------------------------------
+# User units (imoto-wiki-publish)
+# ------------------------------------------------------------------
+say "Installing user units (imoto-wiki-publish)"
+
+install -m 644 "$USER_SRC/imoto-wiki-publish.service" "$USER_DST/imoto-wiki-publish.service"
+install -m 644 "$USER_SRC/imoto-wiki-publish.timer"   "$USER_DST/imoto-wiki-publish.timer"
+
+systemctl --user daemon-reload
+systemctl --user enable --now imoto-wiki-publish.timer
+
+# ------------------------------------------------------------------
 # Verify
 # ------------------------------------------------------------------
 say "Verifying timer status"
-systemctl list-timers --all --no-pager | grep -E 'drive-sync|credit-claim' || true
-systemctl --user list-timers --all --no-pager | grep -E 'credit-claim' || true
+systemctl list-timers --all --no-pager | grep -E 'drive-sync|credit-claim|imoto-wiki' || true
+systemctl --user list-timers --all --no-pager | grep -E 'credit-claim|imoto-wiki' || true
 
 say "Done."

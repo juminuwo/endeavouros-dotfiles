@@ -1,0 +1,6 @@
+[Unit]
+Description=Publish Imoto Labs vault to Quartz wiki
+
+[Service]
+Type=oneshot
+ExecStart=/home/howis/git/imoto-labs-wiki/publish.sh
