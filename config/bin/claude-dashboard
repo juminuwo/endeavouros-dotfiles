@@ -27,6 +27,7 @@ from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import VerticalScroll
+from textual.message import Message
 from textual.reactive import reactive
 from textual.widgets import Footer, Header, Static
 
@@ -286,11 +287,26 @@ class SessionCard(Static):
         margin: 0 0 1 0;
         background: $surface;
     }
+    SessionCard:hover {
+        border: round #6a8aaa;
+    }
     SessionCard.-selected {
         border: heavy #88c0ff;
         background: $boost;
     }
     """
+
+    class Clicked(Message):
+        def __init__(self, index: int) -> None:
+            super().__init__()
+            self.index = index
+
+    def __init__(self, index: int = 0) -> None:
+        super().__init__()
+        self.index = index
+
+    def on_click(self) -> None:
+        self.post_message(self.Clicked(self.index))
 
 
 class EmptyState(Static):
@@ -378,8 +394,8 @@ class Dashboard(App):
             for child in list(scroll.children):
                 child.remove()
             self.cards = []
-            for _ in sessions:
-                card = SessionCard()
+            for i, _ in enumerate(sessions):
+                card = SessionCard(index=i)
                 scroll.mount(card)
                 self.cards.append(card)
 
@@ -424,6 +440,11 @@ class Dashboard(App):
 
     def action_refresh_now(self) -> None:
         self.refresh_data()
+
+    def on_session_card_clicked(self, event: SessionCard.Clicked) -> None:
+        if 0 <= event.index < len(self.sessions):
+            self.cursor_index = event.index
+            self.action_select()
 
 
 if __name__ == "__main__":
