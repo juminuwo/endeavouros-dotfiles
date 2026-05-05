@@ -28,6 +28,7 @@
     ~/bin/clip-img: config/clip-img
     ~/bin/paste-dedented: config/paste-dedented
     ~/bin/claude-notify: config/claude-alerts/claude-notify
+    ~/Documents/online-personal/_slides-assets/rose-pine.css: config/slides-themes/rose-pine.css
     ~/.local/bin/restore_i3_session.sh: config/bin/restore_i3_session.sh
     ~/.local/bin/save_i3_session.sh: config/bin/save_i3_session.sh
     ~/.local/bin/soundwire-tray: config/bin/soundwire-tray
