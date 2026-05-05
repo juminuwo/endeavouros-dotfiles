@@ -16,6 +16,7 @@
     ~/.claude/settings.json: config/claude-settings.json
     ~/.claude/keybindings.json: config/claude-keybindings.json
     ~/.claude/skills/research-first: config/claude-skills/research-first
+    ~/.claude/skills/tech-wiki: config/claude-skills/tech-wiki
     ~/.claude/skills/update-projects: config/claude-skills/update-projects
     ~/.config/kitty/current-theme.conf: config/kitty-current-theme.conf
     ~/.config/systemd/user/mmo-mouse-workspaces.service: config/systemd/user/mmo-mouse-workspaces.service
@@ -32,6 +33,8 @@
     ~/.local/bin/restore_i3_session.sh: config/bin/restore_i3_session.sh
     ~/.local/bin/save_i3_session.sh: config/bin/save_i3_session.sh
     ~/.local/bin/soundwire-tray: config/bin/soundwire-tray
+    ~/.local/bin/claude-dashboard: config/bin/claude-dashboard
+    ~/.local/bin/claude-dashboard-spawn: config/bin/claude-dashboard-spawn
     ~/.config/picom/picom.conf: config/picom.conf
     ~/.config/fcitx5/profile: config/fcitx5/profile
     ~/.config/fcitx5/config: config/fcitx5/config

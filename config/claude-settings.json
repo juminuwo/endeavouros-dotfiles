@@ -1,5 +1,49 @@
 {
   "permissions": {
+    "allow": [
+      "Read",
+      "Glob",
+      "Grep",
+      "WebFetch",
+      "WebSearch",
+      "Bash(ls *)",
+      "Bash(tree *)",
+      "Bash(pwd *)",
+      "Bash(which *)",
+      "Bash(whoami *)",
+      "Bash(date *)",
+      "Bash(cat *)",
+      "Bash(df *)",
+      "Bash(du *)",
+      "Bash(file *)",
+      "Bash(stat *)",
+      "Bash(uname *)",
+      "Bash(env *)",
+      "Bash(printenv *)",
+      "Bash(wc *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(find *)",
+      "Bash(grep *)",
+      "Bash(rg *)",
+      "Bash(git status *)",
+      "Bash(git log *)",
+      "Bash(git diff *)",
+      "Bash(git branch *)",
+      "Bash(git show *)",
+      "Bash(git stash *)",
+      "Bash(git remote *)",
+      "Bash(git rev-parse *)",
+      "Bash(uv run *)",
+      "Bash(uv sync *)",
+      "Bash(pytest *)",
+      "Bash(npm run *)",
+      "Bash(node *)",
+      "Bash(python *)",
+      "Bash(docker ps *)",
+      "Bash(docker logs *)",
+      "Bash(gh *)"
+    ],
     "defaultMode": "auto"
   },
   "hooks": {
@@ -44,17 +88,29 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/howis/.local/bin/claude-dashboard-spawn"
+          }
+        ]
+      }
     ]
   },
   "enabledPlugins": {
     "commit-commands@claude-code-plugins": true,
+    "code-review@claude-code-plugins": true,
     "frontend-design@claude-code-plugins": true,
     "context7@claude-plugins-official": true,
-    "github@claude-plugins-official": false,
+    "github@claude-plugins-official": true,
     "code-review@claude-plugins-official": true,
-    "supabase@claude-plugins-official": false,
-    "linear@claude-plugins-official": false,
-    "slack@claude-plugins-official": false,
+    "supabase@claude-plugins-official": true,
+    "linear@claude-plugins-official": true,
+    "slack@claude-plugins-official": true,
     "code-simplifier@claude-plugins-official": true
   },
   "alwaysThinkingEnabled": true,

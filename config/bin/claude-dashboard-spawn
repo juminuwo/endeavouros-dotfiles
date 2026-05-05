@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Spawn a `claude-dashboard` tab as tab 1 in the kitty OS window where a
+# Claude Code session has just started — but only if one isn't already
+# present in that OS window.
+#
+# Wired into Claude Code via a SessionStart hook. Silently exits when not
+# running under a kitty instance with `listen_on` configured.
+
+LOG="/tmp/claude-dashboard-spawn.log"
+
+[ -n "${KITTY_LISTEN_ON:-}" ] || { echo "$(date -Iseconds) no KITTY_LISTEN_ON" >>"$LOG"; exit 0; }
+[ -n "${KITTY_WINDOW_ID:-}" ] || { echo "$(date -Iseconds) no KITTY_WINDOW_ID" >>"$LOG"; exit 0; }
+
+DASHBOARD_TITLE="claude-dashboard"
+DASHBOARD_BIN="$HOME/.local/bin/claude-dashboard"
+
+# Serialize so two parallel SessionStart hooks don't both spawn.
+LOCK="/tmp/claude-dashboard-spawn-${KITTY_LISTEN_ON##*/}.lock"
+exec 200>"$LOCK"
+flock -n 200 || { echo "$(date -Iseconds) lock held, skipping (pid=$$)" >>"$LOG"; exit 0; }
+
+echo "=== $(date -Iseconds) spawn (pid=$$) ===" >>"$LOG"
+
+ls_json=$(kitty @ ls --to "$KITTY_LISTEN_ON" 2>>"$LOG") || { echo "kitty @ ls failed" >>"$LOG"; exit 0; }
+
+exists=$(printf '%s' "$ls_json" | jq -r \
+  --argjson wid "$KITTY_WINDOW_ID" \
+  --arg title "$DASHBOARD_TITLE" '
+    .[]
+    | select(any(.tabs[].windows[]; .id == $wid))
+    | .tabs
+    | map(select(.title == $title))
+    | length
+  ' 2>>"$LOG" || echo 0)
+
+echo "existing=$exists" >>"$LOG"
+[ "${exists:-0}" -gt 0 ] && { echo "already present" >>"$LOG"; exit 0; }
+
+# --copy-env so the new tab inherits the calling shell's PATH (incl. ~/.local/bin).
+# uv is at ~/.local/bin/uv and is needed by the dashboard's shebang.
+# --keep-focus so the dashboard opens in the background — claude tab keeps focus.
+echo "launching: $DASHBOARD_BIN" >>"$LOG"
+kitty @ launch \
+  --to "$KITTY_LISTEN_ON" \
+  --type=tab \
+  --tab-title="$DASHBOARD_TITLE" \
+  --location=first \
+  --match "id:$KITTY_WINDOW_ID" \
+  --copy-env \
+  --keep-focus \
+  "$DASHBOARD_BIN" >>"$LOG" 2>&1
+echo "launch rc=$?" >>"$LOG"

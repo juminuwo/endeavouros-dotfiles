@@ -1,0 +1,436 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.12"
+# dependencies = ["textual>=0.80"]
+# ///
+"""Claude Code session dashboard for Kitty (impala-style cards).
+
+Lists every running Claude Code session as its own card. Navigate with
+j/k or arrow keys; press Enter to focus that session's kitty tab.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+from rich.console import Group
+from rich.table import Table
+from rich.text import Text
+
+from textual import work
+from textual.app import App, ComposeResult
+from textual.binding import Binding
+from textual.containers import VerticalScroll
+from textual.reactive import reactive
+from textual.widgets import Footer, Header, Static
+
+PROJECTS_DIR = Path.home() / ".claude" / "projects"
+REFRESH_SECONDS = 2.0
+TAIL_BYTES = 200_000
+KITTY_TIMEOUT = 2.0
+LOG_PATH = Path("/tmp") / f"claude-dashboard-{os.getuid()}.log"
+
+logging.basicConfig(
+    filename=str(LOG_PATH),
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+)
+log = logging.getLogger("claude-dashboard")
+
+
+def _log_unhandled(exc_type, exc, tb):
+    log.error("uncaught", exc_info=(exc_type, exc, tb))
+    sys.__excepthook__(exc_type, exc, tb)
+
+
+sys.excepthook = _log_unhandled
+
+
+# --- kitty IPC -------------------------------------------------------------
+
+
+def kitty_cmd(*args: str) -> list[str]:
+    cmd = ["kitty", "@"]
+    sock = os.environ.get("KITTY_LISTEN_ON")
+    if sock:
+        cmd += ["--to", sock]
+    cmd += list(args)
+    return cmd
+
+
+def kitty_ls() -> list:
+    try:
+        r = subprocess.run(
+            kitty_cmd("ls"),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=KITTY_TIMEOUT,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return []
+    if r.returncode != 0:
+        log.warning("kitty ls rc=%s stderr=%r", r.returncode, r.stderr[:200])
+        return []
+    try:
+        return json.loads(r.stdout)
+    except json.JSONDecodeError:
+        return []
+
+
+# --- session discovery ----------------------------------------------------
+
+
+def is_claude_process(proc: dict) -> bool:
+    cmdline = proc.get("cmdline") or []
+    if not cmdline:
+        return False
+    base = cmdline[0].rsplit("/", 1)[-1]
+    if base == "claude":
+        return True
+    if base in ("node", "nodejs"):
+        for arg in cmdline[1:]:
+            if "claude" in arg and ("cli.js" in arg or "/share/claude/" in arg):
+                return True
+    return False
+
+
+def proc_cwd(pid: int) -> str | None:
+    try:
+        return os.readlink(f"/proc/{pid}/cwd")
+    except OSError:
+        return None
+
+
+def encode_cwd(path: str) -> str:
+    return path.replace("/", "-")
+
+
+def find_session_jsonl(cwd: str) -> Path | None:
+    pd = PROJECTS_DIR / encode_cwd(cwd)
+    if not pd.exists():
+        return None
+    jsonls = [p for p in pd.glob("*.jsonl") if p.is_file()]
+    if not jsonls:
+        return None
+    return max(jsonls, key=lambda p: p.stat().st_mtime)
+
+
+def find_claude_tabs():
+    seen: set[Path] = set()
+    for osw in kitty_ls():
+        for tab in osw.get("tabs", []):
+            for win in tab.get("windows", []):
+                for proc in win.get("foreground_processes", []):
+                    if not is_claude_process(proc):
+                        continue
+                    pid = proc.get("pid")
+                    cwd = proc_cwd(pid) if pid else None
+                    cwd = cwd or win.get("cwd", "")
+                    if not cwd:
+                        continue
+                    j = find_session_jsonl(cwd)
+                    if not j or j in seen:
+                        continue
+                    seen.add(j)
+                    yield {"tab_id": tab["id"], "cwd": cwd, "jsonl": j}
+                    break
+
+
+def tail_lines(p: Path, max_bytes: int = TAIL_BYTES) -> list[str]:
+    try:
+        size = p.stat().st_size
+        with p.open("rb") as f:
+            f.seek(max(0, size - max_bytes))
+            data = f.read()
+    except OSError:
+        return []
+    return data.decode("utf-8", errors="ignore").split("\n")
+
+
+def session_summary(j: Path) -> dict:
+    last_user = last_assistant = last_tool = ""
+    for line in tail_lines(j):
+        if not line.strip():
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        rt = rec.get("type")
+        if rt == "user":
+            content = rec.get("message", {}).get("content")
+            if isinstance(content, list):
+                for it in content:
+                    if isinstance(it, dict) and it.get("type") == "text":
+                        text = it.get("text") or ""
+                        if text and not text.startswith("<"):
+                            last_user = text
+            elif isinstance(content, str) and content and not content.startswith("<"):
+                last_user = content
+        elif rt == "assistant":
+            content = rec.get("message", {}).get("content") or []
+            if isinstance(content, list):
+                for it in content:
+                    if not isinstance(it, dict):
+                        continue
+                    if it.get("type") == "text":
+                        text = (it.get("text") or "").strip()
+                        if text:
+                            last_assistant = text
+                    elif it.get("type") == "tool_use":
+                        last_tool = it.get("name") or last_tool
+    return {
+        "last_user": last_user,
+        "last_assistant": last_assistant,
+        "last_tool": last_tool,
+        "mtime": j.stat().st_mtime,
+    }
+
+
+# --- formatting -----------------------------------------------------------
+
+
+def status_for(mtime: float) -> tuple[str, str, str]:
+    """Return (label, emoji, rich_style)."""
+    age = time.time() - mtime
+    if age < 3:
+        return ("working", "●", "bold #5ee066")
+    if age < 30:
+        return ("thinking", "●", "bold #f5b34a")
+    if age < 300:
+        return ("idle", "●", "bold #6ea3ff")
+    return ("stale", "●", "dim #888888")
+
+
+def fmt_age(mtime: float) -> str:
+    age = int(time.time() - mtime)
+    if age < 60:
+        return f"{age}s ago"
+    if age < 3600:
+        return f"{age // 60}m ago"
+    if age < 86400:
+        return f"{age // 3600}h ago"
+    return f"{age // 86400}d ago"
+
+
+def truncate(s: str, n: int) -> str:
+    s = " ".join(s.split())
+    if n <= 1:
+        return s[:n]
+    return (s[: n - 1] + "…") if len(s) > n else s
+
+
+def gather_sessions() -> list[dict]:
+    out = []
+    for tab in find_claude_tabs():
+        s = session_summary(tab["jsonl"])
+        out.append(
+            {
+                "tab_id": tab["tab_id"],
+                "project": Path(tab["cwd"]).name or tab["cwd"],
+                "cwd": tab["cwd"],
+                "summary": s,
+            }
+        )
+    return out
+
+
+def render_card(session: dict) -> Group:
+    sm = session["summary"]
+    label, dot, style = status_for(sm["mtime"])
+    age = fmt_age(sm["mtime"])
+    activity = sm["last_tool"] or sm["last_assistant"] or "—"
+    prompt = sm["last_user"] or "(no prompt yet)"
+
+    # Top row: project (left) + status dot+label (right)
+    top = Table.grid(expand=True, padding=(0, 0))
+    top.add_column(ratio=1)
+    top.add_column(justify="right")
+    project_text = Text(session["project"], style="bold #a8c7ff")
+    status_text = Text()
+    status_text.append(f"{dot} ", style=style)
+    status_text.append(label, style=style)
+    top.add_row(project_text, status_text)
+
+    # Middle row: last user prompt
+    middle = Text(f"“{truncate(prompt, 200)}”", style="italic #b8b8b8")
+
+    # Bottom row: activity (left) + age (right)
+    bottom = Table.grid(expand=True, padding=(0, 0))
+    bottom.add_column(ratio=1)
+    bottom.add_column(justify="right")
+    bottom.add_row(
+        Text(truncate(activity, 80), style="#7ec8ff"),
+        Text(age, style="dim #909090"),
+    )
+
+    return Group(top, Text(""), middle, Text(""), bottom)
+
+
+# --- widgets --------------------------------------------------------------
+
+
+class SessionCard(Static):
+    DEFAULT_CSS = """
+    SessionCard {
+        height: 7;
+        border: round #3a3a4a;
+        padding: 0 2;
+        margin: 0 0 1 0;
+        background: $surface;
+    }
+    SessionCard.-selected {
+        border: heavy #88c0ff;
+        background: $boost;
+    }
+    """
+
+
+class EmptyState(Static):
+    DEFAULT_CSS = """
+    EmptyState {
+        height: 1fr;
+        content-align: center middle;
+        color: #707080;
+        text-style: italic;
+    }
+    """
+
+
+# --- app ------------------------------------------------------------------
+
+
+class Dashboard(App):
+    CSS = """
+    Screen {
+        background: $background;
+    }
+
+    #cards {
+        padding: 1 2 0 2;
+    }
+
+    Header {
+        background: $surface;
+    }
+    """
+
+    BINDINGS = [
+        Binding("q", "quit", "Quit"),
+        Binding("r", "refresh_now", "Refresh"),
+        Binding("j,down", "cursor_next", "↓"),
+        Binding("k,up", "cursor_prev", "↑"),
+        Binding("enter", "select", "Switch"),
+    ]
+
+    TITLE = "Claude Code"
+
+    cursor_index: reactive[int] = reactive(0)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.sessions: list[dict] = []
+        self.cards: list[SessionCard] = []
+
+    def compose(self) -> ComposeResult:
+        yield Header(show_clock=True, icon="")
+        yield VerticalScroll(EmptyState("waiting for sessions…"), id="cards")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self.refresh_data()
+        self.set_interval(REFRESH_SECONDS, self.refresh_data)
+
+    @work(thread=True, exclusive=True)
+    def refresh_data(self) -> None:
+        try:
+            sessions = gather_sessions()
+        except Exception as e:  # noqa: BLE001
+            log.exception("refresh failed")
+            self.call_from_thread(
+                self.notify, f"refresh failed: {e}", severity="error"
+            )
+            return
+        self.call_from_thread(self._apply_sessions, sessions)
+
+    def _apply_sessions(self, sessions: list[dict]) -> None:
+        scroll = self.query_one("#cards", VerticalScroll)
+        prev_count = len(self.sessions)
+        self.sessions = sessions
+
+        if not sessions:
+            for child in list(scroll.children):
+                child.remove()
+            scroll.mount(EmptyState("No active Claude Code sessions."))
+            self.cards = []
+            self.sub_title = "0 active"
+            return
+
+        # If the count changed, rebuild cards. Otherwise just update content.
+        if len(sessions) != len(self.cards) or prev_count == 0:
+            for child in list(scroll.children):
+                child.remove()
+            self.cards = []
+            for _ in sessions:
+                card = SessionCard()
+                scroll.mount(card)
+                self.cards.append(card)
+
+        if self.cursor_index >= len(self.cards):
+            self.cursor_index = max(0, len(self.cards) - 1)
+        self._refresh_cards()
+        self.sub_title = f"{len(sessions)} active"
+
+    def _refresh_cards(self) -> None:
+        for i, (card, s) in enumerate(zip(self.cards, self.sessions)):
+            card.update(render_card(s))
+            card.set_class(i == self.cursor_index, "-selected")
+
+    def watch_cursor_index(self, _old: int, _new: int) -> None:
+        if self.cards:
+            self._refresh_cards()
+            try:
+                self.cards[self.cursor_index].scroll_visible(animate=False)
+            except Exception:  # noqa: BLE001
+                pass
+
+    def action_cursor_next(self) -> None:
+        if self.cards and self.cursor_index < len(self.cards) - 1:
+            self.cursor_index += 1
+
+    def action_cursor_prev(self) -> None:
+        if self.cards and self.cursor_index > 0:
+            self.cursor_index -= 1
+
+    def action_select(self) -> None:
+        if not self.cards or self.cursor_index >= len(self.sessions):
+            return
+        tab_id = self.sessions[self.cursor_index]["tab_id"]
+        try:
+            subprocess.run(
+                kitty_cmd("focus-tab", "--match", f"id:{tab_id}"),
+                check=False,
+                timeout=KITTY_TIMEOUT,
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            self.notify("kitty focus-tab timed out", severity="warning")
+
+    def action_refresh_now(self) -> None:
+        self.refresh_data()
+
+
+if __name__ == "__main__":
+    log.info("dashboard starting (pid=%d)", os.getpid())
+    try:
+        Dashboard().run()
+    except Exception:
+        log.exception("dashboard crashed")
+        raise
+    log.info("dashboard exited normally")
