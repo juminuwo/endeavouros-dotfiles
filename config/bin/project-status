@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# project-status — i3blocks block for the current project.
+#
+# Output: " <project>" (Nerd Font folder glyph) or "—" when no project.
+# Click handlers (via $BLOCK_BUTTON):
+#   1 (left)   -> cycle to next project
+#   2 (middle) -> rename current project
+#   3 (right)  -> rofi picker
+
+set -euo pipefail
+
+PROJECT_SWITCH="$HOME/.local/bin/project-switch"
+
+case "${BLOCK_BUTTON:-0}" in
+    1) setsid "$PROJECT_SWITCH" switch-next >/dev/null 2>&1 & disown || true ;;
+    2) setsid "$PROJECT_SWITCH" rename      >/dev/null 2>&1 & disown || true ;;
+    3) setsid "$PROJECT_SWITCH" switch      >/dev/null 2>&1 & disown || true ;;
+esac
+
+current=$("$PROJECT_SWITCH" current 2>/dev/null || true)
+if [[ -n "$current" ]]; then
+    printf ' %s\n' "$current"
+else
+    printf '—\n'
+fi

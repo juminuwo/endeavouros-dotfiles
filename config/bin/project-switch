@@ -1,0 +1,437 @@
+#!/usr/bin/env bash
+# project-switch — group kitty windows on i3 ws6 (misc) + ws7 (claude) into
+# named projects and swap them as a unit using i3 marks + scratchpad.
+#
+# State lives in i3 marks: each managed kitty carries `proj:<name>:<role>`
+# where role ∈ {claude, misc}. The active project is whichever pair is
+# visible on ws6/ws7; all other projects' windows live in the scratchpad,
+# processes alive but hidden.
+#
+# Subcommands: ensure-default | list | current | switch [name] |
+#              switch-next | new [name] | rename [new] | reconcile
+
+set -euo pipefail
+
+LOG="/tmp/project-switch.log"
+LOCK="/tmp/project-switch.lock"
+DEFAULT_PROJECT="scratch"
+WS_CLAUDE=7
+WS_MISC=6
+SIGNAL=5  # i3blocks RTMIN+5 — must match the [project] block in i3blocks.conf
+ROFI_CFG="$HOME/.config/rofi/rofidmenu.rasi"
+
+# ---------------------------------------------------------------------------
+# helpers
+# ---------------------------------------------------------------------------
+
+_log() { printf '%s %s\n' "$(date -Iseconds)" "$*" >>"$LOG"; }
+
+_die() {
+    local msg="$*"
+    _log "ERROR: $msg"
+    printf 'project-switch: %s\n' "$msg" >&2
+    command -v notify-send >/dev/null && notify-send -u critical "project-switch" "$msg" || true
+    exit 1
+}
+
+# Serialize state-mutating subcommands so rapid Mod+y mashing doesn't race.
+_lock() {
+    exec 9>"$LOCK"
+    flock -w 5 9 || _die "could not acquire lock $LOCK"
+}
+
+_signal_i3blocks() {
+    pkill -RTMIN+$SIGNAL i3blocks 2>/dev/null || true
+}
+
+_ws_for_role() {
+    case "$1" in
+        claude) echo "$WS_CLAUDE" ;;
+        misc)   echo "$WS_MISC" ;;
+        *) _die "unknown role: $1" ;;
+    esac
+}
+
+_validate_name() {
+    local n="$1"
+    [[ -n "$n" ]] || _die "project name is empty"
+    [[ "$n" =~ ^[A-Za-z0-9._-]+$ ]] || _die "invalid project name: '$n' (allowed: A-Z a-z 0-9 . _ -)"
+    [[ "$n" != *:* ]] || _die "project name cannot contain ':'"
+}
+
+_marks_all() {
+    i3-msg -t get_marks | jq -r '.[]' | grep '^proj:' || true
+}
+
+_project_names() {
+    _marks_all | sed 's/^proj:\([^:]*\):.*$/\1/' | sort -u
+}
+
+_mark_exists() {
+    _marks_all | grep -Fxq "$1"
+}
+
+# Walk the i3 tree and emit `con_id<TAB>workspace<TAB>mark` for every window
+# carrying a `proj:*` mark. Used to determine the current project.
+_proj_windows() {
+    i3-msg -t get_tree | jq -r '
+        [.. | objects | select(.type == "workspace")]
+        | map(.name as $ws | [.. | objects | select(.window != null and (.marks // [] | any(startswith("proj:"))))]
+            | map([.id, $ws, (.marks | map(select(startswith("proj:")))[0])] | @tsv)
+        )
+        | flatten | .[]
+    ' 2>/dev/null || true
+}
+
+_current_project() {
+    # The active project is whichever proj:<name>:<role> mark is on ws6 or ws7.
+    _proj_windows | awk -v c="$WS_CLAUDE" -v m="$WS_MISC" '
+        $2 == c || $2 == m { sub(/^proj:/, "", $3); sub(/:.*/, "", $3); print $3 }
+    ' | sort -u | head -n1
+}
+
+# Detect duplicate marks (shouldn't happen, but i3 4.x permits it).
+_dedupe_marks() {
+    _proj_windows | awk -F'\t' '{ count[$3]++; ids[$3] = ids[$3]" "$1 } END {
+        for (m in count) if (count[m] > 1) {
+            split(ids[m], arr, " ")
+            # keep the first non-empty id, unmark the rest
+            kept = ""
+            for (i in arr) {
+                if (arr[i] == "") continue
+                if (kept == "") { kept = arr[i]; continue }
+                printf "[con_id=%s] unmark %s\n", arr[i], m
+            }
+        }
+    }' | while read -r cmd; do
+        [[ -n "$cmd" ]] || continue
+        _log "dedupe: $cmd"
+        i3-msg -- "$cmd" >/dev/null
+    done
+}
+
+# Spawn a new kitty window, then mark it and place it on the role's workspace.
+# `for_window` is config-only and rejected at runtime by i3-msg, so we poll
+# get_tree for the unique WM_CLASS instead, then apply the mark via [con_id=N].
+_spawn_role() {
+    local name="$1" role="$2"
+    local ws; ws=$(_ws_for_role "$role")
+    local uuid; uuid=$(tr -dc 'a-f0-9' </proc/sys/kernel/random/uuid | head -c 16)
+    local cls="kitty-proj-spawn-$uuid"
+    local mark="proj:$name:$role"
+
+    _log "spawn role=$role name=$name ws=$ws cls=$cls"
+
+    # setsid detaches from this script's session so kitty survives if the
+    # caller exits early (e.g., bound to an i3 keybind).
+    # 9>&- closes the inherited lock fd so kitty doesn't keep the lock alive
+    # for its entire lifetime.
+    setsid kitty --class "$cls" --title "$mark" >/dev/null 2>&1 9>&- &
+    disown || true
+
+    # Poll until the new window appears in the i3 tree (cold-start ~100-400ms;
+    # allow 5s headroom for first-launch / cold disk).
+    local con_id="" i
+    for i in $(seq 1 100); do
+        con_id=$(i3-msg -t get_tree | jq -r --arg c "$cls" '
+            [.. | objects | select(.window_properties.instance == $c or .window_properties.class == $c)][0].id // empty
+        ' 2>/dev/null || true)
+        if [[ -n "$con_id" ]]; then
+            i3-msg -- "[con_id=$con_id] mark --add $mark, move container to workspace number $ws, floating disable" >/dev/null
+            _log "spawn ok: $mark con_id=$con_id (after $((i*50))ms)"
+            return 0
+        fi
+        sleep 0.05
+    done
+    _die "spawn timeout: kitty class=$cls did not appear within 5s"
+}
+
+# Adopt an existing unmarked kitty window on a workspace into the current
+# project. Used by ensure-default on cold start.
+_adopt_on_workspace() {
+    local name="$1" role="$2" ws; ws=$(_ws_for_role "$role")
+    local con_id
+    con_id=$(i3-msg -t get_tree | jq -r --arg ws "$ws" '
+        [.. | objects | select(.type == "workspace" and .name == $ws)][0]
+        | [.. | objects | select(
+              .window != null
+              and (.window_properties.class // "" | ascii_downcase | contains("kitty"))
+              and ((.marks // []) | map(startswith("proj:")) | any | not)
+          )][0].id // empty
+    ' 2>/dev/null || true)
+
+    if [[ -n "$con_id" ]]; then
+        _log "adopt con_id=$con_id ws=$ws role=$role -> proj:$name:$role"
+        i3-msg -- "[con_id=$con_id] mark --add proj:$name:$role" >/dev/null
+        return 0
+    fi
+    return 1
+}
+
+# ---------------------------------------------------------------------------
+# subcommands
+# ---------------------------------------------------------------------------
+
+cmd_ensure_default() {
+    _lock
+    if [[ -n "$(_marks_all)" ]]; then
+        _log "ensure-default: marks already exist, no-op"
+        return 0
+    fi
+    _log "ensure-default: bootstrapping '$DEFAULT_PROJECT'"
+    _adopt_on_workspace "$DEFAULT_PROJECT" claude || _spawn_role "$DEFAULT_PROJECT" claude
+    _adopt_on_workspace "$DEFAULT_PROJECT" misc   || _spawn_role "$DEFAULT_PROJECT" misc
+    _signal_i3blocks
+}
+
+cmd_list() {
+    local current; current=$(_current_project || true)
+    _project_names | while read -r name; do
+        [[ -z "$name" ]] && continue
+        if [[ "$name" == "$current" ]]; then
+            printf '%s (active)\n' "$name"
+        else
+            printf '%s\n' "$name"
+        fi
+    done
+}
+
+cmd_current() {
+    local c; c=$(_current_project || true)
+    [[ -n "$c" ]] || exit 1
+    printf '%s\n' "$c"
+}
+
+# Spawn any role window missing for the current project. Self-healing.
+cmd_reconcile() {
+    local current; current=$(_current_project || true)
+    [[ -n "$current" ]] || { _log "reconcile: no current project"; return 0; }
+    _dedupe_marks
+    for role in claude misc; do
+        if ! _mark_exists "proj:$current:$role"; then
+            _log "reconcile: missing role=$role for $current — spawning"
+            _spawn_role "$current" "$role"
+        fi
+    done
+}
+
+# Atomic switch: hide current pair to scratchpad, surface target pair tiled.
+_do_switch() {
+    local target="$1"
+    local current; current=$(_current_project || true)
+
+    if [[ "$target" == "$current" ]]; then
+        _log "switch: target == current ($target), no-op"
+        return 0
+    fi
+
+    # Verify target exists.
+    if ! _mark_exists "proj:$target:claude" && ! _mark_exists "proj:$target:misc"; then
+        _die "no such project: $target"
+    fi
+
+    local cmd=""
+    if [[ -n "$current" ]]; then
+        cmd+="[con_mark=\"^proj:${current}:.*\$\"] move scratchpad ; "
+    fi
+    cmd+="[con_mark=\"^proj:${target}:claude\$\"] move to workspace number ${WS_CLAUDE}, floating disable ; "
+    cmd+="[con_mark=\"^proj:${target}:misc\$\"]   move to workspace number ${WS_MISC}, floating disable"
+
+    _log "switch: '$current' -> '$target'"
+    i3-msg -- "$cmd" >/dev/null
+}
+
+cmd_switch() {
+    local target="${1:-}"
+    if [[ -z "$target" ]]; then
+        # Picker — prepend action items so the user doesn't need to memorise
+        # every keybind. Branches dispatch into cmd_new / cmd_rename / cmd_delete.
+        local current; current=$(_current_project || true)
+        local menu="$(cmd_list)"$'\n'
+        menu+="[ new project ]"
+        if [[ -n "$current" ]]; then
+            menu+=$'\n'"[ rename '${current}' ]"
+            menu+=$'\n'"[ delete '${current}' ]"
+        fi
+
+        local sel
+        sel=$(printf '%s\n' "$menu" | rofi -dmenu -i -p "project" -config "$ROFI_CFG" 2>/dev/null || true)
+        [[ -n "$sel" ]] || { _log "switch: cancelled"; return 0; }
+
+        case "$sel" in
+            "[ new project ]")      cmd_new; return ;;
+            "[ rename '"*"' ]")     cmd_rename; return ;;
+            "[ delete '"*"' ]")     cmd_delete; return ;;
+        esac
+        target=$(printf '%s' "$sel" | sed 's/ (active)$//')
+    fi
+    _lock
+    _validate_name "$target"
+    _do_switch "$target"
+    cmd_reconcile
+    _signal_i3blocks
+}
+
+cmd_switch_next() {
+    _lock
+    local current; current=$(_current_project || true)
+    local names; names=$(_project_names)
+    [[ -n "$names" ]] || return 0
+    local target
+    target=$(printf '%s\n' "$names" | awk -v c="$current" '
+        BEGIN { found=0; first=""; nxt="" }
+        { if (first == "") first=$0; if (found == 1 && nxt == "") nxt=$0; if ($0 == c) found=1 }
+        END { print (nxt != "" ? nxt : first) }
+    ')
+    [[ "$target" == "$current" ]] && return 0
+    _do_switch "$target"
+    cmd_reconcile
+    _signal_i3blocks
+}
+
+cmd_new() {
+    _lock
+    local name="${1:-}"
+    if [[ -z "$name" ]]; then
+        name=$(printf '' | rofi -dmenu -p "new project" -config "$ROFI_CFG" 2>/dev/null || true)
+        [[ -n "$name" ]] || { _log "new: cancelled"; return 0; }
+    fi
+    _validate_name "$name"
+
+    # Collision check.
+    if _project_names | grep -Fxq "$name"; then
+        _die "project '$name' already exists"
+    fi
+
+    # Hide the current project's pair before spawning so the new pair lands
+    # on the bare workspaces.
+    local current; current=$(_current_project || true)
+    if [[ -n "$current" ]]; then
+        i3-msg -- "[con_mark=\"^proj:${current}:.*\$\"] move scratchpad" >/dev/null
+    fi
+
+    _spawn_role "$name" claude
+    _spawn_role "$name" misc
+
+    _signal_i3blocks
+    _log "new: created '$name'"
+}
+
+cmd_delete() {
+    _lock
+    local target="${1:-}"
+    local current; current=$(_current_project || true)
+    if [[ -z "$target" ]]; then
+        target="$current"
+    fi
+    [[ -n "$target" ]] || _die "no project specified and no current project"
+
+    if ! _project_names | grep -Fxq "$target"; then
+        _die "no such project: $target"
+    fi
+
+    # Don't strand the user — refuse to delete the only project.
+    local count; count=$(_project_names | wc -l)
+    if [[ "$count" -le 1 ]]; then
+        _die "cannot delete '$target': it is the only project (create another first)"
+    fi
+
+    # Send kill to both windows. If kitty has running processes (e.g.,
+    # claude-code, a server, a build), it will show its close-confirmation
+    # overlay and ignore the close request — visible from i3 because the
+    # windows + marks remain. Poll for actual disappearance.
+    _log "delete: sending kill for '$target'"
+    i3-msg -- "[con_mark=\"^proj:${target}:.*\$\"] kill" >/dev/null
+
+    local i after=0
+    for i in $(seq 1 15); do
+        sleep 0.1
+        after=$(_marks_all | grep -c "^proj:${target}:" || true)
+        [[ "$after" -eq 0 ]] && break
+    done
+
+    if [[ "$after" -gt 0 ]]; then
+        _log "delete: blocked by kitty close-confirmation (still=$after); aborting"
+        command -v notify-send >/dev/null && \
+            notify-send "project-switch" \
+                "Delete '$target' blocked — kitty is showing a close confirmation (running processes). Answer it, then try again." || true
+        return 0
+    fi
+
+    # All target windows are gone. If we just deleted the active project,
+    # switch to a fallback so ws6/ws7 stay populated.
+    if [[ "$target" == "$current" ]]; then
+        local fallback; fallback=$(_project_names | head -n1)
+        [[ -n "$fallback" ]] && _do_switch "$fallback"
+    fi
+    _signal_i3blocks
+    _log "delete: completed '$target'"
+}
+
+cmd_rename() {
+    _lock
+    local current; current=$(_current_project || true)
+    [[ -n "$current" ]] || _die "no current project to rename"
+
+    local newname="${1:-}"
+    if [[ -z "$newname" ]]; then
+        newname=$(printf '%s' "$current" | rofi -dmenu -p "rename '$current' ->" -config "$ROFI_CFG" 2>/dev/null || true)
+        [[ -n "$newname" ]] || { _log "rename: cancelled"; return 0; }
+    fi
+    _validate_name "$newname"
+
+    [[ "$newname" == "$current" ]] && return 0
+    if _project_names | grep -Fxq "$newname"; then
+        _die "project '$newname' already exists"
+    fi
+
+    local cmd=""
+    for role in claude misc; do
+        if _mark_exists "proj:$current:$role"; then
+            cmd+="[con_mark=\"^proj:${current}:${role}\$\"] unmark proj:${current}:${role}, mark --add proj:${newname}:${role} ; "
+        fi
+    done
+    [[ -n "$cmd" ]] && i3-msg -- "${cmd%; }" >/dev/null
+
+    _log "rename: '$current' -> '$newname'"
+    _signal_i3blocks
+}
+
+# ---------------------------------------------------------------------------
+# main
+# ---------------------------------------------------------------------------
+
+main() {
+    local sub="${1:-}"
+    [[ $# -gt 0 ]] && shift || true
+    case "$sub" in
+        ensure-default) cmd_ensure_default "$@" ;;
+        list)           cmd_list "$@" ;;
+        current)        cmd_current "$@" ;;
+        switch)         cmd_switch "$@" ;;
+        switch-next)    cmd_switch_next "$@" ;;
+        new)            cmd_new "$@" ;;
+        rename)         cmd_rename "$@" ;;
+        delete)         cmd_delete "$@" ;;
+        reconcile)      _lock; cmd_reconcile "$@" ;;
+        ""|-h|--help|help)
+            cat <<EOF
+project-switch — i3+kitty project pair manager
+
+Usage:
+  project-switch ensure-default     idempotent bootstrap (run from i3 exec_always)
+  project-switch list               list all projects (current marked active)
+  project-switch current            print active project name
+  project-switch switch [name]      switch to project (rofi picker if name omitted)
+  project-switch switch-next        cycle to next project
+  project-switch new [name]         create a new project pair
+  project-switch rename [new]       rename current project
+  project-switch delete [name]      kill both windows for project (default: current)
+  project-switch reconcile          respawn missing role windows for current
+EOF
+            ;;
+        *) _die "unknown subcommand: $sub (try --help)" ;;
+    esac
+}
+
+main "$@"

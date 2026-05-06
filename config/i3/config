@@ -310,6 +310,12 @@ bindsym $mod+Shift+v exec --no-startup-id ~/bin/clip-img
 # Paste clipboard with common leading whitespace stripped (for Claude Code / TUI output)
 bindsym Control+Shift+$mod+v exec --no-startup-id ~/bin/paste-dedented
 
+# Project switcher (groups kitty windows on ws6/ws7 into named projects)
+bindsym $mod+y       exec --no-startup-id $HOME/.local/bin/project-switch switch
+bindsym $mod+Shift+y exec --no-startup-id $HOME/.local/bin/project-switch new
+bindsym $mod+Ctrl+y  exec --no-startup-id $HOME/.local/bin/project-switch rename
+bindsym $mod+Ctrl+Shift+y exec --no-startup-id $HOME/.local/bin/project-switch delete
+
 # Power Profiles menu switcher (rofi)
 # bindsym $mod+Shift+p exec --no-startup-id ~/.config/i3/scripts/power-profiles
 
@@ -392,6 +398,9 @@ for_window [class="com.mitchellh.ghostty"] border pixel 5
 
 # make sure it loads gtk configs
 exec_always $HOME/.config/i3/scripts/import-gsettings
+
+# bootstrap / self-heal the active project on ws6 + ws7 (idempotent)
+exec_always --no-startup-id $HOME/.local/bin/project-switch ensure-default
 
 ## compositor
 
