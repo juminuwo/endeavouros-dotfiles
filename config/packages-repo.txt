@@ -74,6 +74,9 @@ vhs
 yazi
 yt-dlp
 zoxide
+glow
+wget
+pkgfile
 7zip
 unrar
 unzip
@@ -130,6 +133,7 @@ imv
 obs-studio
 obsidian
 qbittorrent
+rpi-imager
 telegram-desktop
 thunar
 thunar-archive-plugin

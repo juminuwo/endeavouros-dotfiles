@@ -2,6 +2,8 @@
 caffeine-ng
 cursor-bin
 google-chrome
+nordtray-bin
+nordvpn-bin
 slack-desktop
 soundwire
 tailscale-systray-git

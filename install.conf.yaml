@@ -42,6 +42,8 @@
     ~/.config/picom/picom.conf: config/picom.conf
     ~/.config/fcitx5/profile: config/fcitx5/profile
     ~/.config/fcitx5/config: config/fcitx5/config
+    ~/.config/glow/glow.yml: config/glow/glow.yml
+    ~/.config/glow/rose-pine.json: config/glow/rose-pine.json
 
 - shell:
   - [git submodule update --init --recursive, Installing submodules]

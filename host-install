@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Installs host-specific systemd units that dotbot can't manage:
+# Installs host-specific configuration that dotbot can't manage:
+#   - hardware-specific packages from config/host/packages-host-repo.txt
+#       (NVIDIA driver/CUDA, Intel microcode, etc. — varies per machine)
 #   - /etc/systemd/system/drive-sync.{service,timer}            (system, root)
 #   - ~/.config/systemd/user/credit-claim.{service,timer}       (user)
 #   - ~/.config/systemd/user/imoto-wiki-publish.{service,timer} (user)
@@ -14,6 +16,15 @@ USER_SRC="$BASEDIR/config/host/systemd/user"
 USER_DST="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 
 say() { printf '\n=== %s ===\n' "$*"; }
+
+# ------------------------------------------------------------------
+# Hardware-specific packages (NVIDIA + Intel ucode on this host)
+# ------------------------------------------------------------------
+HOST_REPO_LIST="$BASEDIR/config/host/packages-host-repo.txt"
+if [[ -s "$HOST_REPO_LIST" ]]; then
+  say "Installing host-specific repo packages"
+  grep -v '^#\|^$' "$HOST_REPO_LIST" | sudo pacman -S --needed --noconfirm -
+fi
 
 # ------------------------------------------------------------------
 # System units (drive-sync) — needs sudo

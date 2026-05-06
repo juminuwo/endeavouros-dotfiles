@@ -44,8 +44,8 @@
 
 ### Three install entry points (idempotent, re-runnable)
 - `./install` — dotbot symlinker, driven by `install.conf.yaml`
-- `./install-packages` — installs everything in `config/packages-{repo,aur}.txt`
-- `./host-install` — installs systemd units from `config/host/systemd/`
+- `./install-packages` — installs portable packages in `config/packages-{repo,aur}.txt` (works on any machine)
+- `./host-install` — installs hardware-specific packages (`config/host/packages-host-repo.txt`) and systemd units from `config/host/systemd/`
 
 ### When adding something, do it in the repo so a fresh machine gets it
 
@@ -53,7 +53,8 @@
 |---|---|---|
 | A config file | `config/<whatever>` | add a `link:` entry in `install.conf.yaml`, run `./install` |
 | A `~/bin/` or `~/.local/bin/` script | `config/<name>` (or `config/bin/<name>` for `~/.local/bin`) | add `link:` entry, `chmod +x` the source, run `./install` |
-| A new dependency | `config/packages-repo.txt` (pacman) or `config/packages-aur.txt` (AUR) | run `./install-packages` |
+| A portable dependency | `config/packages-repo.txt` (pacman) or `config/packages-aur.txt` (AUR) | run `./install-packages` |
+| A hardware-specific package (NVIDIA, Intel ucode, etc.) | `config/host/packages-host-repo.txt` | run `./host-install` |
 | A systemd unit | `config/host/systemd/{system,user}/` | extend `host-install`, re-run it |
 | A Claude Code skill | `config/claude-skills/<name>/SKILL.md` | add `link:` entry pointing at `~/.claude/skills/<name>` |
 

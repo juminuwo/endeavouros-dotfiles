@@ -1,0 +1,19 @@
+# Hardware-specific repo packages for THIS machine.
+# Installed by host-install (not by ./install-packages, which is portable).
+#
+# Current host: Intel CPU + NVIDIA GPU desktop.
+# Adapt this list per machine — laptops without NVIDIA should empty most of it.
+
+# Intel CPU microcode
+intel-ucode
+
+# NVIDIA driver + tooling (LTS kernel branch)
+nvidia-open-lts
+nvidia-settings
+nvidia-hook
+nvidia-inst
+nvidia-container-toolkit
+
+# CUDA + GPU-accelerated runtimes
+cuda
+onnxruntime-cuda
