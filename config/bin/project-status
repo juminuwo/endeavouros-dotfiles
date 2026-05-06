@@ -19,7 +19,7 @@ esac
 
 current=$("$PROJECT_SWITCH" current 2>/dev/null || true)
 if [[ -n "$current" ]]; then
-    printf ' %s\n' "$current"
+    printf "<span foreground='#c4a7e7'> %s</span>\n" "$current"
 else
     printf '—\n'
 fi

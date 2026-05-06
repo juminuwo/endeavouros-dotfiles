@@ -67,4 +67,4 @@ fi
 
 # Pad with spaces so the colored background reads as a button. Pango markup
 # is global (markup=pango); plain text is rendered fine.
-printf ' %s \n\n%s\n%s\n%s\n' "$WS" "$fg" "$bg" "$bd"
+printf '  %s  \n\n%s\n%s\n%s\n' "$WS" "$fg" "$bg" "$bd"
