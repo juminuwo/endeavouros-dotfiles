@@ -37,6 +37,8 @@ REFRESH_SECONDS = 2.0
 TAIL_BYTES = 200_000
 KITTY_TIMEOUT = 2.0
 LOG_PATH = Path("/tmp") / f"claude-dashboard-{os.getuid()}.log"
+CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "claude-dashboard"
+THEME_FILE = CONFIG_DIR / "theme"
 
 logging.basicConfig(
     filename=str(LOG_PATH),
@@ -212,7 +214,7 @@ def tail_lines(p: Path, max_bytes: int = TAIL_BYTES) -> list[str]:
 
 
 def session_summary(j: Path) -> dict:
-    last_user = last_assistant = last_tool = ""
+    last_user = last_assistant = last_tool = last_recap = ""
     for line in tail_lines(j):
         if not line.strip():
             continue
@@ -243,10 +245,20 @@ def session_summary(j: Path) -> dict:
                             last_assistant = text
                     elif it.get("type") == "tool_use":
                         last_tool = it.get("name") or last_tool
+        elif rt == "system" and rec.get("subtype") == "away_summary":
+            content = rec.get("content") or ""
+            if isinstance(content, str) and content.strip():
+                last_recap = content.strip()
+    # Strip the trailing "(disable recaps in /config)" hint Claude appends.
+    if last_recap.endswith(")"):
+        idx = last_recap.rfind("(disable recaps")
+        if idx > 0:
+            last_recap = last_recap[:idx].rstrip()
     return {
         "last_user": last_user,
         "last_assistant": last_assistant,
         "last_tool": last_tool,
+        "last_recap": last_recap,
         "mtime": j.stat().st_mtime,
     }
 
@@ -295,6 +307,7 @@ def gather_sessions() -> list[dict]:
                 "last_user": "",
                 "last_assistant": "",
                 "last_tool": "",
+                "last_recap": "",
                 "mtime": time.time(),
             }
             fresh = True
@@ -323,6 +336,8 @@ def render_card(session: dict) -> Group:
 
     activity = sm["last_tool"] or sm["last_assistant"] or ("—" if not fresh else "waiting for first prompt")
     prompt = sm["last_user"] or ("(no messages yet)" if fresh else "(no prompt yet)")
+    recap = sm.get("last_recap") or ""
+    show_recap = bool(recap) and not fresh and label in ("idle", "stale")
 
     # Top row: project (left) + status dot+label (right)
     top = Table.grid(expand=True, padding=(0, 0))
@@ -334,8 +349,13 @@ def render_card(session: dict) -> Group:
     status_text.append(label, style=style)
     top.add_row(project_text, status_text)
 
-    middle_style = "italic dim #888888" if fresh else "italic #b8b8b8"
-    middle = Text(f"“{truncate(prompt, 200)}”", style=middle_style)
+    if show_recap:
+        middle = Text()
+        middle.append("recap: ", style="bold #c8a8ff")
+        middle.append(truncate(recap, 240), style="#d0d0d0")
+    else:
+        middle_style = "italic dim #888888" if fresh else "italic #b8b8b8"
+        middle = Text(f"“{truncate(prompt, 200)}”", style=middle_style)
 
     bottom = Table.grid(expand=True, padding=(0, 0))
     bottom.add_column(ratio=1)
@@ -434,8 +454,21 @@ class Dashboard(App):
         yield Footer()
 
     def on_mount(self) -> None:
+        try:
+            saved = THEME_FILE.read_text().strip()
+        except OSError:
+            saved = ""
+        if saved and saved in self.available_themes:
+            self.theme = saved
         self.refresh_data()
         self.set_interval(REFRESH_SECONDS, self.refresh_data)
+
+    def watch_theme(self, _old: str, new: str) -> None:
+        try:
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            THEME_FILE.write_text(new)
+        except OSError as e:
+            log.warning("could not save theme: %s", e)
 
     @work(thread=True, exclusive=True)
     def refresh_data(self) -> None:
