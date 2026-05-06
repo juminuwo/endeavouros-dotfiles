@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# i3blocks-workspaces — render a single numbered workspace as a clickable
+# i3blocks block styled like i3bar's native workspace buttons. Hidden when
+# the workspace doesn't exist.
+#
+# Usage:  i3blocks-workspaces <workspace-name>
+#
+# Click handlers via $BLOCK_BUTTON:
+#   1 (left) -> switch to this workspace
+#
+# Output protocol (i3blocks text format, lines):
+#   1. full_text   — workspace name with padding spaces
+#   2. short_text  — empty
+#   3. color       — foreground
+#   4. background  — block fill
+#   5. border      — block border (width set in i3blocks.conf)
+# Empty full_text hides the block.
+
+set -euo pipefail
+
+HIDDEN_RE='^_proj_'
+WS="${1:-}"
+[[ -n "$WS" ]] || { printf '\n'; exit 0; }
+
+# Visible workspaces sorted by num. Output: "<name>\t<focused 0|1>".
+_visible() {
+    i3-msg -t get_workspaces 2>/dev/null | jq -r --arg re "$HIDDEN_RE" '
+        [ .[] | select(.name | test($re) | not) ]
+        | sort_by(.num)
+        | .[]
+        | [.name, (.focused | if . then 1 else 0 end)]
+        | @tsv
+    '
+}
+
+# State for THIS block's workspace.
+focused=0
+exists=0
+while IFS=$'\t' read -r name foc; do
+    if [[ "$name" == "$WS" ]]; then
+        exists=1
+        focused="$foc"
+        break
+    fi
+done < <(_visible)
+
+if [[ "${BLOCK_BUTTON:-0}" == "1" ]]; then
+    i3-msg -- "workspace ${WS}" >/dev/null 2>&1 || true
+    focused=1; exists=1
+fi
+
+if [[ "$exists" != "1" ]]; then
+    printf '\n'
+    exit 0
+fi
+
+# Rose Pine palette.
+if [[ "$focused" == "1" ]]; then
+    fg='#191724'  # base
+    bg='#c4a7e7'  # iris
+    bd='#c4a7e7'  # iris
+else
+    fg='#6e6a86'  # muted
+    bg='#191724'  # base (blends with bar)
+    bd='#26233a'  # overlay
+fi
+
+# Pad with spaces so the colored background reads as a button. Pango markup
+# is global (markup=pango); plain text is rendered fine.
+printf ' %s \n\n%s\n%s\n%s\n' "$WS" "$fg" "$bg" "$bd"

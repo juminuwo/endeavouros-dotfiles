@@ -66,10 +66,6 @@ default_border pixel 5
 # Use Mouse+$mod to drag floating windows to their wanted position
 floating_modifier $mod
 
-# switch/iterate between workspaces
-bindsym $mod+Tab workspace next
-bindsym $mod+Shift+Tab workspace prev
-
 # switch to workspace
 bindcode $mod+10    workspace  $ws1
 bindcode $mod+11    workspace  $ws2
@@ -402,6 +398,9 @@ exec_always $HOME/.config/i3/scripts/import-gsettings
 # bootstrap / self-heal the active project on ws6 + ws7 (idempotent)
 exec_always --no-startup-id $HOME/.local/bin/project-switch ensure-default
 
+# refresh i3blocks workspace blocks on every workspace event (no poll lag)
+exec_always --no-startup-id $HOME/.local/bin/i3-workspace-watcher
+
 ## compositor
 
 # aka transparency
@@ -562,6 +561,10 @@ bar {
 # reference: https://i3wm.org/docs/userguide.html#_tray_output
             #tray_output primary
             tray_padding 0
+
+# Workspace rendering is delegated to i3blocks's [workspaces] block, which
+# filters out project-switch's hidden `_proj_*` workspaces.
+workspace_buttons no
 
 # When strip_workspace_numbers is set to yes,
 # any workspace that has a name of the form

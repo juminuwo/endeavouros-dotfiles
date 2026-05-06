@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# i3-workspace-watcher — subscribe to i3 workspace events and signal i3blocks
+# to refresh the [workspace_*] blocks immediately. Without this, the active
+# workspace highlight lags by up to `interval` seconds.
+#
+# Run from i3 `exec_always`; safe to launch multiple times (idempotent guard).
+
+set -euo pipefail
+
+# Idempotent: don't run a second copy.
+pgrep -fx "bash $0" | grep -vx "$$" >/dev/null && exit 0 || true
+pgrep -fx "/bin/bash $0" | grep -vx "$$" >/dev/null && exit 0 || true
+
+SIGNAL=11
+
+# i3-msg -t subscribe -m blocks and emits one JSON line per event.
+exec i3-msg -t subscribe -m '["workspace"]' 2>/dev/null | \
+while IFS= read -r _; do
+    pkill -RTMIN+${SIGNAL} i3blocks 2>/dev/null || true
+done

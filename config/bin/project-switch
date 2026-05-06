@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
 # project-switch — group kitty windows on i3 ws6 (misc) + ws7 (claude) into
-# named projects and swap them as a unit using i3 marks + scratchpad.
+# named projects and swap them as a unit using i3 workspace renames.
 #
-# State lives in i3 marks: each managed kitty carries `proj:<name>:<role>`
-# where role ∈ {claude, misc}. The active project is whichever pair is
-# visible on ws6/ws7; all other projects' windows live in the scratchpad,
-# processes alive but hidden.
+# State model:
+#   active project   -> windows on workspaces literally named "6" and "7"
+#   inactive project -> windows on workspaces named "_proj_<name>_misc"
+#                       and "_proj_<name>_claude" (hidden because i3 only
+#                       displays a workspace when it's focused)
+#   per-window mark  -> "proj:<name>:<role>" (role ∈ {claude, misc}); marks
+#                       are the canonical project identity, survive renames
+#
+# Switching is a single chained i3-msg of `rename workspace` ops — no
+# container moves, no floating round-trip, layout fully preserved.
 #
 # Subcommands: ensure-default | list | current | switch [name] |
 #              switch-next | new [name] | rename [new] | reconcile
@@ -17,7 +23,8 @@ LOCK="/tmp/project-switch.lock"
 DEFAULT_PROJECT="scratch"
 WS_CLAUDE=7
 WS_MISC=6
-SIGNAL=5  # i3blocks RTMIN+5 — must match the [project] block in i3blocks.conf
+SIGNAL_PROJECT=5    # i3blocks RTMIN+5 — [project] block
+SIGNAL_WORKSPACES=11 # i3blocks RTMIN+11 — [workspaces] block
 ROFI_CFG="$HOME/.config/rofi/rofidmenu.rasi"
 
 # ---------------------------------------------------------------------------
@@ -60,7 +67,8 @@ _lock() {
 }
 
 _signal_i3blocks() {
-    pkill -RTMIN+$SIGNAL i3blocks 2>/dev/null || true
+    pkill -RTMIN+$SIGNAL_PROJECT i3blocks 2>/dev/null || true
+    pkill -RTMIN+$SIGNAL_WORKSPACES i3blocks 2>/dev/null || true
 }
 
 _ws_for_role() {
@@ -69,6 +77,11 @@ _ws_for_role() {
         misc)   echo "$WS_MISC" ;;
         *) _die "unknown role: $1" ;;
     esac
+}
+
+_hidden_ws_name() {
+    # $1 = project name, $2 = role
+    printf '_proj_%s_%s' "$1" "$2"
 }
 
 _validate_name() {
@@ -91,7 +104,7 @@ _mark_exists() {
 }
 
 # Walk the i3 tree and emit `con_id<TAB>workspace<TAB>mark` for every window
-# carrying a `proj:*` mark. Used to determine the current project.
+# carrying a `proj:*` mark. Used by reconcile/dedupe.
 _proj_windows() {
     i3-msg -t get_tree | jq -r '
         [.. | objects | select(.type == "workspace")]
@@ -102,11 +115,22 @@ _proj_windows() {
     ' 2>/dev/null || true
 }
 
+# Active project is whichever proj:<name>:<role> mark sits on the workspace
+# literally named "6" or "7".
 _current_project() {
-    # The active project is whichever proj:<name>:<role> mark is on ws6 or ws7.
     _proj_windows | awk -v c="$WS_CLAUDE" -v m="$WS_MISC" '
         $2 == c || $2 == m { sub(/^proj:/, "", $3); sub(/:.*/, "", $3); print $3 }
     ' | sort -u | head -n1
+}
+
+# Currently focused workspace name (across all outputs).
+_focused_ws() {
+    i3-msg -t get_workspaces | jq -r '.[] | select(.focused) | .name' 2>/dev/null | head -n1
+}
+
+# True if a workspace by this name currently exists.
+_ws_exists() {
+    i3-msg -t get_workspaces | jq -e --arg n "$1" '.[] | select(.name == $n)' >/dev/null 2>&1
 }
 
 # Detect duplicate marks (shouldn't happen, but i3 4.x permits it).
@@ -114,7 +138,6 @@ _dedupe_marks() {
     _proj_windows | awk -F'\t' '{ count[$3]++; ids[$3] = ids[$3]" "$1 } END {
         for (m in count) if (count[m] > 1) {
             split(ids[m], arr, " ")
-            # keep the first non-empty id, unmark the rest
             kept = ""
             for (i in arr) {
                 if (arr[i] == "") continue
@@ -129,9 +152,9 @@ _dedupe_marks() {
     done
 }
 
-# Spawn a new kitty window, then mark it and place it on the role's workspace.
-# `for_window` is config-only and rejected at runtime by i3-msg, so we poll
-# get_tree for the unique WM_CLASS instead, then apply the mark via [con_id=N].
+# Spawn a new kitty window on the role's active workspace (6 or 7), then mark
+# it. for_window is config-only and rejected at runtime by i3-msg, so we poll
+# get_tree for the unique WM_CLASS instead.
 _spawn_role() {
     local name="$1" role="$2"
     local ws; ws=$(_ws_for_role "$role")
@@ -141,15 +164,9 @@ _spawn_role() {
 
     _log "spawn role=$role name=$name ws=$ws cls=$cls"
 
-    # setsid detaches from this script's session so kitty survives if the
-    # caller exits early (e.g., bound to an i3 keybind).
-    # 9>&- closes the inherited lock fd so kitty doesn't keep the lock alive
-    # for its entire lifetime.
     setsid kitty --class "$cls" --title "$mark" >/dev/null 2>&1 9>&- &
     disown || true
 
-    # Poll until the new window appears in the i3 tree (cold-start ~100-400ms;
-    # allow 5s headroom for first-launch / cold disk).
     local con_id="" i
     for i in $(seq 1 100); do
         con_id=$(i3-msg -t get_tree | jq -r --arg c "$cls" '
@@ -185,6 +202,28 @@ _adopt_on_workspace() {
         return 0
     fi
     return 1
+}
+
+# Stash the active project (whose windows are on ws6/ws7) by renaming those
+# workspaces to their hidden names.
+_stash_active() {
+    local name="$1"
+    local hm; hm=$(_hidden_ws_name "$name" misc)
+    local hc; hc=$(_hidden_ws_name "$name" claude)
+    i3-msg -- "rename workspace ${WS_MISC} to ${hm}; rename workspace ${WS_CLAUDE} to ${hc}" >/dev/null
+}
+
+# Ensure an inactive project's windows are parked on its hidden workspaces.
+# Used to migrate windows stashed in the i3 scratchpad (legacy state from
+# the previous scratchpad-based implementation) or any other location.
+# Idempotent: if the windows are already on the right hidden workspace, the
+# move is a no-op.
+_ensure_hidden_parked() {
+    local name="$1"
+    local hm; hm=$(_hidden_ws_name "$name" misc)
+    local hc; hc=$(_hidden_ws_name "$name" claude)
+    i3-msg -- "[con_mark=\"^proj:${name}:misc\$\"]   move container to workspace ${hm}, floating disable" >/dev/null 2>&1 || true
+    i3-msg -- "[con_mark=\"^proj:${name}:claude\$\"] move container to workspace ${hc}, floating disable" >/dev/null 2>&1 || true
 }
 
 # ---------------------------------------------------------------------------
@@ -235,7 +274,8 @@ cmd_reconcile() {
     done
 }
 
-# Atomic switch: hide current pair to scratchpad, surface target pair tiled.
+# Atomic switch via workspace renames: stash current to hidden names,
+# surface target's hidden workspaces as 6/7. No window movement.
 _do_switch() {
     local target="$1"
     local current; current=$(_current_project || true)
@@ -245,27 +285,50 @@ _do_switch() {
         return 0
     fi
 
-    # Verify target exists.
+    # Verify target exists (its hidden workspaces should hold its windows).
     if ! _mark_exists "proj:$target:claude" && ! _mark_exists "proj:$target:misc"; then
         _die "no such project: $target"
     fi
 
+    local target_hm; target_hm=$(_hidden_ws_name "$target" misc)
+    local target_hc; target_hc=$(_hidden_ws_name "$target" claude)
+
+    # Migration / self-heal: if the target's hidden workspaces don't exist
+    # yet (e.g. windows are still in the legacy scratchpad), pull the
+    # marked windows onto them. The subsequent rename then succeeds.
+    if ! _ws_exists "$target_hm" || ! _ws_exists "$target_hc"; then
+        _log "switch: migrating '$target' windows to hidden workspaces"
+        _ensure_hidden_parked "$target"
+    fi
+
+    # Capture focus so we can re-display 6/7 after the rename if user was
+    # looking at one of them. (Renames don't change what an output displays.)
+    local focused; focused=$(_focused_ws)
+    local refocus=""
+    case "$focused" in
+        "$WS_MISC"|"$WS_CLAUDE") refocus="$focused" ;;
+    esac
+
     local cmd=""
     if [[ -n "$current" ]]; then
-        cmd+="[con_mark=\"^proj:${current}:.*\$\"] move scratchpad ; "
+        local cur_hm; cur_hm=$(_hidden_ws_name "$current" misc)
+        local cur_hc; cur_hc=$(_hidden_ws_name "$current" claude)
+        cmd+="rename workspace ${WS_MISC} to ${cur_hm}; "
+        cmd+="rename workspace ${WS_CLAUDE} to ${cur_hc}; "
     fi
-    cmd+="[con_mark=\"^proj:${target}:claude\$\"] move to workspace number ${WS_CLAUDE}, floating disable ; "
-    cmd+="[con_mark=\"^proj:${target}:misc\$\"]   move to workspace number ${WS_MISC}, floating disable"
+    cmd+="rename workspace ${target_hm} to ${WS_MISC}; "
+    cmd+="rename workspace ${target_hc} to ${WS_CLAUDE}"
+    if [[ -n "$refocus" ]]; then
+        cmd+="; workspace number ${refocus}"
+    fi
 
-    _log "switch: '$current' -> '$target'"
+    _log "switch: '$current' -> '$target' (refocus=${refocus:-none})"
     i3-msg -- "$cmd" >/dev/null
 }
 
 cmd_switch() {
     local target="${1:-}"
     if [[ -z "$target" ]]; then
-        # Picker — prepend action items so the user doesn't need to memorise
-        # every keybind. Branches dispatch into cmd_new / cmd_rename / cmd_delete.
         local current; current=$(_current_project || true)
         local menu="$(cmd_list)"$'\n'
         menu+="[ new project ]"
@@ -318,16 +381,14 @@ cmd_new() {
     fi
     _validate_name "$name"
 
-    # Collision check.
     if _project_names | grep -Fxq "$name"; then
         _die "project '$name' already exists"
     fi
 
-    # Hide the current project's pair before spawning so the new pair lands
-    # on the bare workspaces.
+    # Stash the current pair to hidden workspaces so 6/7 are free for spawn.
     local current; current=$(_current_project || true)
     if [[ -n "$current" ]]; then
-        i3-msg -- "[con_mark=\"^proj:${current}:.*\$\"] move scratchpad" >/dev/null
+        _stash_active "$current"
     fi
 
     _spawn_role "$name" claude
@@ -350,16 +411,24 @@ cmd_delete() {
         _die "no such project: $target"
     fi
 
-    # Don't strand the user — refuse to delete the only project.
     local count; count=$(_project_names | wc -l)
     if [[ "$count" -le 1 ]]; then
         _die "cannot delete '$target': it is the only project (create another first)"
     fi
 
-    # Send kill to both windows. If kitty has running processes (e.g.,
-    # claude-code, a server, a build), it will show its close-confirmation
-    # overlay and ignore the close request — visible from i3 because the
-    # windows + marks remain. Poll for actual disappearance.
+    # If deleting the active project, swap to a fallback first so the kill
+    # happens against an inactive project — its windows are on hidden
+    # workspaces, which disappear cleanly when emptied.
+    if [[ "$target" == "$current" ]]; then
+        local fallback
+        fallback=$(_project_names | grep -vFx "$target" | head -n1)
+        [[ -n "$fallback" ]] || _die "internal: no fallback found (target=$target)"
+        _do_switch "$fallback"
+    fi
+
+    # Send kill by mark. If kitty has running processes (e.g., claude-code,
+    # a server) it shows its close-confirmation overlay and ignores the
+    # close request — visible because the marks remain.
     _log "delete: sending kill for '$target'"
     i3-msg -- "[con_mark=\"^proj:${target}:.*\$\"] kill" >/dev/null
 
@@ -378,12 +447,6 @@ cmd_delete() {
         return 0
     fi
 
-    # All target windows are gone. If we just deleted the active project,
-    # switch to a fallback so ws6/ws7 stay populated.
-    if [[ "$target" == "$current" ]]; then
-        local fallback; fallback=$(_project_names | head -n1)
-        [[ -n "$fallback" ]] && _do_switch "$fallback"
-    fi
     _signal_i3blocks
     _log "delete: completed '$target'"
 }
@@ -405,9 +468,7 @@ cmd_rename() {
         _die "project '$newname' already exists"
     fi
 
-    # Capture con_id by mark BEFORE unmarking, then re-mark by con_id.
-    # Avoids both the ';' whitespace bug and the "criterion no longer matches"
-    # issue that comes from chaining unmark+mark on the same con_mark.
+    # Rewrite marks (active project lives on 6/7 — workspace names don't change).
     for role in claude misc; do
         local oldmark="proj:${current}:${role}"
         local newmark="proj:${newname}:${role}"
@@ -416,8 +477,8 @@ cmd_rename() {
             [.. | objects | select(.marks // [] | any(. == $m))][0].id // empty
         ' 2>/dev/null || true)
         [[ -n "$conid" ]] || continue
-        i3-msg -- "[con_id=$conid] unmark"          >/dev/null
-        i3-msg -- "[con_id=$conid] mark --add $newmark" >/dev/null
+        i3-msg -- "[con_id=$conid] unmark"               >/dev/null
+        i3-msg -- "[con_id=$conid] mark --add $newmark"  >/dev/null
     done
 
     _log "rename: '$current' -> '$newname'"

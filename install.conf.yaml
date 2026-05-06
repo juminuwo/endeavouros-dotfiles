@@ -37,6 +37,8 @@
     ~/.local/bin/claude-dashboard-spawn: config/bin/claude-dashboard-spawn
     ~/.local/bin/project-switch: config/bin/project-switch
     ~/.local/bin/project-status: config/bin/project-status
+    ~/.local/bin/i3blocks-workspaces: config/bin/i3blocks-workspaces
+    ~/.local/bin/i3-workspace-watcher: config/bin/i3-workspace-watcher
     ~/.config/picom/picom.conf: config/picom.conf
     ~/.config/fcitx5/profile: config/fcitx5/profile
     ~/.config/fcitx5/config: config/fcitx5/config
