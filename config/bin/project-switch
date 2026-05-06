@@ -30,8 +30,27 @@ _die() {
     local msg="$*"
     _log "ERROR: $msg"
     printf 'project-switch: %s\n' "$msg" >&2
-    command -v notify-send >/dev/null && notify-send -u critical "project-switch" "$msg" || true
+    command -v notify-send >/dev/null && notify-send -u critical -t 30000 "project-switch" "$msg" || true
     exit 1
+}
+
+# Strip trailing whitespace from any proj:* marks (works around i3 including
+# leading whitespace into the mark name when commands are chained with ';').
+_normalize_marks() {
+    local raw
+    raw=$(i3-msg -t get_tree | jq -r '
+        [.. | objects | select(.marks // [] | any(test("^proj:.+:[^ :]+[ \t]+$")))]
+        | map(.id as $id | .marks[] | select(test("^proj:.+:[^ :]+[ \t]+$")) | [$id, .] | @tsv)
+        | .[]
+    ' 2>/dev/null || true)
+    [[ -z "$raw" ]] && return 0
+    while IFS=$'\t' read -r conid bad_mark; do
+        [[ -z "$conid" ]] && continue
+        local clean; clean=$(printf '%s' "$bad_mark" | sed -E 's/[[:space:]]+$//')
+        _log "normalize: con_id=$conid '$bad_mark' -> '$clean'"
+        i3-msg -- "[con_id=$conid] unmark" >/dev/null
+        i3-msg -- "[con_id=$conid] mark --add $clean" >/dev/null
+    done <<<"$raw"
 }
 
 # Serialize state-mutating subcommands so rapid Mod+y mashing doesn't race.
@@ -174,6 +193,7 @@ _adopt_on_workspace() {
 
 cmd_ensure_default() {
     _lock
+    _normalize_marks
     if [[ -n "$(_marks_all)" ]]; then
         _log "ensure-default: marks already exist, no-op"
         return 0
@@ -353,7 +373,7 @@ cmd_delete() {
     if [[ "$after" -gt 0 ]]; then
         _log "delete: blocked by kitty close-confirmation (still=$after); aborting"
         command -v notify-send >/dev/null && \
-            notify-send "project-switch" \
+            notify-send -t 30000 "project-switch" \
                 "Delete '$target' blocked — kitty is showing a close confirmation (running processes). Answer it, then try again." || true
         return 0
     fi
@@ -385,13 +405,20 @@ cmd_rename() {
         _die "project '$newname' already exists"
     fi
 
-    local cmd=""
+    # Capture con_id by mark BEFORE unmarking, then re-mark by con_id.
+    # Avoids both the ';' whitespace bug and the "criterion no longer matches"
+    # issue that comes from chaining unmark+mark on the same con_mark.
     for role in claude misc; do
-        if _mark_exists "proj:$current:$role"; then
-            cmd+="[con_mark=\"^proj:${current}:${role}\$\"] unmark proj:${current}:${role}, mark --add proj:${newname}:${role} ; "
-        fi
+        local oldmark="proj:${current}:${role}"
+        local newmark="proj:${newname}:${role}"
+        local conid
+        conid=$(i3-msg -t get_tree | jq -r --arg m "$oldmark" '
+            [.. | objects | select(.marks // [] | any(. == $m))][0].id // empty
+        ' 2>/dev/null || true)
+        [[ -n "$conid" ]] || continue
+        i3-msg -- "[con_id=$conid] unmark"          >/dev/null
+        i3-msg -- "[con_id=$conid] mark --add $newmark" >/dev/null
     done
-    [[ -n "$cmd" ]] && i3-msg -- "${cmd%; }" >/dev/null
 
     _log "rename: '$current' -> '$newname'"
     _signal_i3blocks
