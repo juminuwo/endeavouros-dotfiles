@@ -63,10 +63,10 @@ Imoto Labs/
 
 The Imoto Labs vault is published as a static site via Quartz 4.
 
-- **Quartz repo:** `~/git/imoto-labs-wiki/`
-- **Live site:** https://juminuwo.github.io/imoto-labs-wiki/
-- **Publish script:** `~/git/imoto-labs-wiki/publish.sh` — rsyncs vault → `content/`, renames folder indexes to `index.md`, strips `[[Founding]]`/`[[Meetings]]` links from root, commits and pushes to `v4`. GitHub Actions builds and deploys.
-- **Automatic publish:** systemd user timer `imoto-wiki-publish.timer` (hourly, with `Persistent=true`). Units live in `~/git/endeavouros-dotfiles/config/host/systemd/user/`.
+- **Quartz repo:** `~/git/imoto-labs-wiki/` (remote: `Imoto-Labs/imoto-labs-wiki`, **private**)
+- **Live site:** _migrating_ to `wiki.adrianliu.co.uk` (Cloudflare Pages + Cloudflare Access). DNS/CF setup pending; no live deployment in the meantime.
+- **Publish script:** `~/git/imoto-labs-wiki/publish.sh` — rsyncs vault → `content/`, renames folder indexes to `index.md`, strips `[[Founding]]`/`[[Meetings]]` links from root, commits and pushes to `v4`. Cloudflare Pages will build on push once configured.
+- **Automatic publish:** systemd user timer `imoto-wiki-publish.timer` (hourly). **Currently disabled** — re-enable with `systemctl --user enable --now imoto-wiki-publish.timer` once Cloudflare Pages is wired up.
 
 To publish on demand:
 ```bash
