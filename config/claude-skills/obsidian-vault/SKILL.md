@@ -64,7 +64,7 @@ Imoto Labs/
 The Imoto Labs vault is published as a static site via Quartz 4.
 
 - **Quartz repo:** `~/git/imoto-labs-wiki/` (remote: `Imoto-Labs/imoto-labs-wiki`, **private**)
-- **Live site:** Cloudflare Workers (Static Assets) on a `*.workers.dev` URL — pinned in Slack. No custom domain.
+- **Live site:** https://imoto-labs-wiki.adrianliu95.workers.dev/ (Cloudflare Workers Static Assets, no custom domain).
 - **Auth:** Cloudflare Access with GitHub Org rule — only members of the `Imoto-Labs` GitHub org can read.
 - **Publish script:** `~/git/imoto-labs-wiki/publish.sh` — rsyncs vault → `content/`, renames folder indexes to `index.md`, strips `[[Founding]]`/`[[Meetings]]` links from root, commits and pushes to `v4`. Cloudflare Workers Builds picks up the push, runs `npx quartz build` then `npx wrangler deploy`.
 - **Wrangler config:** `wrangler.jsonc` at repo root — `assets.directory: ./public`, `not_found_handling: 404-page`.
