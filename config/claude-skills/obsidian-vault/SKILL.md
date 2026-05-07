@@ -66,9 +66,10 @@ The Imoto Labs vault is published as a static site via Quartz 4.
 - **Quartz repo:** `~/git/imoto-labs-wiki/` (remote: `Imoto-Labs/imoto-labs-wiki`, **private**)
 - **Live site:** https://imoto-labs-wiki.adrianliu95.workers.dev/ (Cloudflare Workers Static Assets, no custom domain).
 - **Auth:** Cloudflare Access with GitHub Org rule — only members of the `Imoto-Labs` GitHub org can read.
-- **Publish script:** `~/git/imoto-labs-wiki/publish.sh` — rsyncs vault → `content/`, renames folder indexes to `index.md`, strips `[[Founding]]`/`[[Meetings]]` links from root, commits and pushes to `v4`. Cloudflare Workers Builds picks up the push, runs `npx quartz build` then `npx wrangler deploy`.
+- **Publish script:** `~/git/imoto-labs-wiki/publish.sh` — rsyncs vault → `content/`, renames folder indexes to `index.md`, strips `[[Founding]]`/`[[Meetings]]` links from root, commits and pushes to `v4`. Cloudflare Workers Builds picks up the push, runs `npx quartz build` then `npx wrangler deploy`. Refuses to run if the remote has unmerged commits — tells you to run `pull.sh` first.
+- **Pull script:** `~/git/imoto-labs-wiki/pull.sh` — the inverse. `git pull --rebase --autostash`, then for each file changed in the pull, copies it into the vault while reversing publish.sh's folder-index rename. Use after a PR merges so those edits land in your local vault (and via Obsidian Sync, on mobile). Skips the root index — publish.sh's link strip would clobber it; manually merge if needed.
 - **Wrangler config:** `wrangler.jsonc` at repo root — `assets.directory: ./public`, `not_found_handling: 404-page`.
-- **Automatic publish:** systemd user timer `imoto-wiki-publish.timer` (hourly, with `Persistent=true`). Units in `~/git/endeavouros-dotfiles/config/host/systemd/user/`.
+- **Automatic publish:** systemd user timer `imoto-wiki-publish.timer` (hourly, with `Persistent=true`). Units in `~/git/endeavouros-dotfiles/config/host/systemd/user/`. The timer invokes publish.sh; if remote is ahead, the run fails and the user must run `pull.sh` manually before the next publish succeeds.
 
 To publish on demand:
 ```bash
