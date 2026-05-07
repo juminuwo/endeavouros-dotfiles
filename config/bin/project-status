@@ -2,20 +2,13 @@
 # project-status — i3blocks block for the current project.
 #
 # Output: " <project>" (Nerd Font folder glyph) or "—" when no project.
-# Click handlers (via $BLOCK_BUTTON):
-#   1 (left)   -> cycle to next project
-#   2 (middle) -> rename current project
-#   3 (right)  -> rofi picker
+# Click handlers are intentionally disabled — switching is keybind-only
+# (see Mod+y in i3 config) to avoid signal-races with i3blocks refresh
+# that left the displayed name stuck behind on the previous project.
 
 set -euo pipefail
 
 PROJECT_SWITCH="$HOME/.local/bin/project-switch"
-
-case "${BLOCK_BUTTON:-0}" in
-    1) setsid "$PROJECT_SWITCH" switch-next >/dev/null 2>&1 & disown || true ;;
-    2) setsid "$PROJECT_SWITCH" rename      >/dev/null 2>&1 & disown || true ;;
-    3) setsid "$PROJECT_SWITCH" switch      >/dev/null 2>&1 & disown || true ;;
-esac
 
 current=$("$PROJECT_SWITCH" current 2>/dev/null || true)
 if [[ -n "$current" ]]; then

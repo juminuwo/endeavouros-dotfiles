@@ -20,6 +20,7 @@ set -euo pipefail
 
 LOG="/tmp/project-switch.log"
 LOCK="/tmp/project-switch.lock"
+HISTORY_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/project-switch/history"
 DEFAULT_PROJECT="scratch"
 WS_CLAUDE=7
 WS_MISC=6
@@ -101,6 +102,52 @@ _project_names() {
 
 _mark_exists() {
     _marks_all | grep -Fxq "$1"
+}
+
+# Per-user file holding project names in last-accessed order, most recent
+# first. Updated on every successful switch / new / rename. Survives across
+# i3 restarts so the rofi picker doesn't reset to alphabetical on relogin.
+_history_touch() {
+    local name="$1"
+    [[ -n "$name" ]] || return 0
+    mkdir -p "$(dirname "$HISTORY_FILE")"
+    local tmp; tmp=$(mktemp)
+    {
+        printf '%s\n' "$name"
+        [[ -f "$HISTORY_FILE" ]] && grep -Fxv -- "$name" "$HISTORY_FILE" || true
+    } >"$tmp"
+    mv "$tmp" "$HISTORY_FILE"
+}
+
+_history_remove() {
+    local name="$1"
+    [[ -n "$name" ]] || return 0
+    [[ -f "$HISTORY_FILE" ]] || return 0
+    local tmp; tmp=$(mktemp)
+    grep -Fxv -- "$name" "$HISTORY_FILE" >"$tmp" || true
+    mv "$tmp" "$HISTORY_FILE"
+}
+
+# Emit existing project names ordered by last access (recent first); any
+# project not yet in history is appended at the end in alphabetical order.
+_history_order() {
+    local known; known=$(_project_names)
+    [[ -z "$known" ]] && return 0
+    local seen=""
+    if [[ -f "$HISTORY_FILE" ]]; then
+        while IFS= read -r name; do
+            [[ -z "$name" ]] && continue
+            if grep -Fxq -- "$name" <<<"$known"; then
+                printf '%s\n' "$name"
+                seen+="$name"$'\n'
+            fi
+        done <"$HISTORY_FILE"
+    fi
+    while IFS= read -r name; do
+        [[ -z "$name" ]] && continue
+        grep -Fxq -- "$name" <<<"$seen" && continue
+        printf '%s\n' "$name"
+    done <<<"$known"
 }
 
 # Walk the i3 tree and emit `con_id<TAB>workspace<TAB>mark` for every window
@@ -240,6 +287,7 @@ cmd_ensure_default() {
     _log "ensure-default: bootstrapping '$DEFAULT_PROJECT'"
     _adopt_on_workspace "$DEFAULT_PROJECT" claude || _spawn_role "$DEFAULT_PROJECT" claude
     _adopt_on_workspace "$DEFAULT_PROJECT" misc   || _spawn_role "$DEFAULT_PROJECT" misc
+    _history_touch "$DEFAULT_PROJECT"
     _signal_i3blocks
 }
 
@@ -261,15 +309,25 @@ cmd_current() {
     printf '%s\n' "$c"
 }
 
-# Spawn any role window missing for the current project. Self-healing.
+# Adopt any unmarked kitty already on ws6/ws7 into the current project,
+# spawning only as a fallback. Self-healing.
+#
+# Adoption matters because users often open extra kitty windows on ws6/ws7
+# via $mod+Return (or any other route outside project-switch). Without this,
+# every switch-away-and-back would see no proj:<current>:<role> mark and
+# spawn a duplicate kitty alongside the orphan.
 cmd_reconcile() {
     local current; current=$(_current_project || true)
     [[ -n "$current" ]] || { _log "reconcile: no current project"; return 0; }
     _dedupe_marks
     for role in claude misc; do
         if ! _mark_exists "proj:$current:$role"; then
-            _log "reconcile: missing role=$role for $current — spawning"
-            _spawn_role "$current" "$role"
+            if _adopt_on_workspace "$current" "$role"; then
+                _log "reconcile: adopted unmarked kitty for role=$role into $current"
+            else
+                _log "reconcile: missing role=$role for $current — spawning"
+                _spawn_role "$current" "$role"
+            fi
         fi
     done
 }
@@ -324,13 +382,25 @@ _do_switch() {
 
     _log "switch: '$current' -> '$target' (refocus=${refocus:-none})"
     i3-msg -- "$cmd" >/dev/null
+    _history_touch "$target"
 }
 
 cmd_switch() {
     local target="${1:-}"
     if [[ -z "$target" ]]; then
         local current; current=$(_current_project || true)
-        local menu="$(cmd_list)"$'\n'
+        # Order: most-recently-accessed first, the active project last (just
+        # above the action items) so its label is one keystroke away from
+        # the new/rename/delete entries the user usually wants alongside it.
+        local menu=""
+        while IFS= read -r name; do
+            [[ -z "$name" ]] && continue
+            [[ "$name" == "$current" ]] && continue
+            menu+="$name"$'\n'
+        done < <(_history_order)
+        if [[ -n "$current" ]]; then
+            menu+="$current (active)"$'\n'
+        fi
         menu+="[ new project ]"
         if [[ -n "$current" ]]; then
             menu+=$'\n'"[ rename '${current}' ]"
@@ -394,6 +464,7 @@ cmd_new() {
     _spawn_role "$name" claude
     _spawn_role "$name" misc
 
+    _history_touch "$name"
     _signal_i3blocks
     _log "new: created '$name'"
 }
@@ -447,6 +518,7 @@ cmd_delete() {
         return 0
     fi
 
+    _history_remove "$target"
     _signal_i3blocks
     _log "delete: completed '$target'"
 }
@@ -481,6 +553,8 @@ cmd_rename() {
         i3-msg -- "[con_id=$conid] mark --add $newmark"  >/dev/null
     done
 
+    _history_remove "$current"
+    _history_touch  "$newname"
     _log "rename: '$current' -> '$newname'"
     _signal_i3blocks
 }
