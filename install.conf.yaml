@@ -19,6 +19,8 @@
     ~/.claude/skills/tech-wiki: config/claude-skills/tech-wiki
     ~/.claude/skills/update-projects: config/claude-skills/update-projects
     ~/.claude/skills/obsidian-vault: config/claude-skills/obsidian-vault
+    ~/.claude/skills/kanban-sync: config/claude-skills/kanban-sync
+    ~/.claude/agents/kanban-planner.md: config/claude-agents/kanban-planner.md
     ~/.config/kitty/current-theme.conf: config/kitty-current-theme.conf
     ~/.config/systemd/user/mmo-mouse-workspaces.service: config/systemd/user/mmo-mouse-workspaces.service
     ~/.gitconfig: config/gitconfig
