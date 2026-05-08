@@ -1,0 +1,6 @@
+# Runtime state — last-synced commit SHA per repo. Machine-local; rewritten on every sync.
+state.json
+
+# Python bytecode
+__pycache__/
+*.pyc
