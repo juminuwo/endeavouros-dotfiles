@@ -1,7 +1,7 @@
 ---
 name: kanban-sync
-description: Sync the Imoto Labs Obsidian Kanban board with git commit history, OR compose a git commit that includes a `Kanban:` trailer and then sync. Triggers on: "sync the kanban", "update the kanban", "update the board", `/kanban-sync`, "commit and update kanban", "commit with kanban trailer", `/kanban-sync commit`, or any commit request where the user mentions the kanban / board. Two modes — sync-only (default) and commit-then-sync (when the user wants both in one step).
-allowed-tools: Bash, Read, Write, Edit, Glob, Grep
+description: Sync the Imoto Labs Obsidian Kanban board with git commit history, OR compose a git commit that includes a `Kanban:` trailer and then sync, OR answer planning questions ("what's next?", "what's on the kanban?") by reading the board and following card links to local scratchpads. Triggers on: "sync the kanban", "update the kanban", "update the board", `/kanban-sync`, "commit and update kanban", "commit with kanban trailer", `/kanban-sync commit`, "what's next on the kanban", "what's on the kanban", "what should I work on", "what's in flight", "what items are on the kanban", "kanban status", `/kanban`, or any commit request where the user mentions the kanban / board. Three modes — sync-only, commit-then-sync, and plan/status query.
+allowed-tools: Bash, Read, Write, Edit, Glob, Grep, WebFetch
 ---
 
 # Kanban Sync
@@ -95,6 +95,64 @@ Useful flags:
 ### Mode 2 — commit + sync (compose the trailer + run sync after)
 
 The user said something like "commit and update kanban", "commit this with a kanban trailer", or `/kanban-sync commit`. They want the staged work committed AND the board updated in one operation. Walk through the **Commit composition workflow** below, then run sync.
+
+### Mode 3 — plan / status query (read-only summary of the board)
+
+The user said something like "what's next on the kanban?", "what's on the kanban?", "what should I work on?", "what's in flight?", `/kanban` (no args), "kanban status". They want a synthesised view of the board, not a sync.
+
+Walk through the **Plan query workflow** below. **Read-only** — never run sync.py, never edit the kanban, never commit anything for this mode.
+
+## Plan query workflow
+
+### Step 1 — detect scope
+
+Run `git rev-parse --show-toplevel` to find the current repo. Match it against `repo_path` in `config.json` to determine which project (if any) the user is inside.
+
+- **Inside a tracked repo** → default scope is "this project". Show that project's cards.
+- **Outside any tracked repo** (e.g. in `~`, in vault, in dotfiles) → default scope is "everything". Show all projects grouped.
+- If the user explicitly asked about a different project ("what's next on business-scout?"), override.
+
+### Step 2 — read the kanban
+
+Read the board file from `config.json`'s `kanban_path`. Parse cards by column. Filter by the project tag from Step 1 if scoped.
+
+### Step 3 — present a synthesised view
+
+Default ordering: **In Progress → Up Next → Blocked → Backlog**. Skip Done unless explicitly asked. Within each column: priority order (`#p0` first, then `#p1`, then `#p2`, then untagged).
+
+For each card show:
+- ID + title (1 line)
+- Status badges: column / priority / stage tags (`#bench`/`#pilot`/`#fleet` for driver-shield)
+- Due date if `@{date}` present
+- The scratchpad link (one per card, pulled from the body)
+
+Keep it tight — this is a dashboard, not a wall of text. ~10 cards max in the response unless the user asks for more.
+
+### Step 4 — drill into a specific card if asked
+
+If the user asks "tell me about DSH-009" or "what's the status on the weatherproofing card?", **read the linked scratchpad section locally** (do NOT WebFetch). See **Following card links to local files** below.
+
+## Following card links to local files
+
+Cards link to scratchpads via GitHub URLs:
+```
+[Pilot Install §Plan B](https://github.com/Imoto-Labs/driver-shield/blob/master/docs/Pilot%20Install%20Scratchpad.md#plan-b--ip67-junction-box--acrylic-dome-revised-2026-05-06)
+```
+
+These are commit-pinned for stability when published, but for local reading you should skip the round-trip and read the file directly off disk:
+
+1. Match the URL prefix against each project's `github_url` in `config.json`.
+2. If matched, strip `<github_url>/blob/<branch>/` to get the relative path: `docs/Pilot Install Scratchpad.md`.
+3. URL-decode (`%20` → space, etc.).
+4. Prepend the project's `repo_path`: `/home/howis/git/driver-shield/docs/Pilot Install Scratchpad.md`.
+5. Read the local file with the `Read` tool.
+6. Optionally locate the section by `#fragment` anchor in the URL — GitHub slugifies as lowercase, em-dashes drop, spaces → `-`. Approximate match is fine; if multiple sections seem plausible, scan a wider chunk.
+
+Falls back to `WebFetch` only if:
+- The URL doesn't match any tracked project's `github_url`
+- The local file doesn't exist (e.g. user hasn't pulled latest)
+
+This is the whole point of having `config.json` as a project map: the GitHub URL → local path mapping is unambiguous, so card links resolve to local reads.
 
 ## Commit composition workflow
 
@@ -199,8 +257,12 @@ The user pushes when they're ready. Don't `git push` as part of this skill.
 |---|---|
 | "sync the kanban", "update the board", `/kanban-sync` | Mode 1 — sync only |
 | "commit and update kanban", "commit with kanban trailer", `/kanban-sync commit` | Mode 2 — commit + sync |
+| "what's next?", "what's on the kanban?", "what should I work on?", `/kanban`, "kanban status" | Mode 3 — plan / status query |
+| "tell me about DSH-009", "what's the status of the weatherproofing card?" | Mode 3, drilling into a specific card |
 | "commit this" (no kanban mention, while inside a tracked repo) | NOT this skill — use the standard commit flow |
 | Just a question about how trailers work | Answer from this doc; don't run anything |
+
+Mode 3 is **read-only** — never run sync.py, never edit anything. If a planning query naturally leads to "and let's commit DSH-X done", confirm with the user, then transition to Mode 2.
 
 If ambiguous, ask. Better to clarify than to commit something the user didn't intend.
 

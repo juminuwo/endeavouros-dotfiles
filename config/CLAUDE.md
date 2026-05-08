@@ -22,3 +22,6 @@ This file is symlinked to `~/git/CLAUDE.md` and inherited by every project under
 
 ## Obsidian Vault
 The vault lives at `~/Documents/online-personal/`. For any vault-related task, the `obsidian-vault` skill loads the full structure, conventions, and publishing flow on trigger — don't duplicate vault content here.
+
+## Imoto Labs Kanban (planning surface)
+The portfolio kanban for Imoto Labs work lives at `~/Documents/online-personal/Imoto Labs/Kanban.md`. **For "what's next" / "what should I work on" / "what's in flight" / planning questions**, this is the entry point — invoke the `kanban-sync` skill (Mode 3, read-only). Cards link to repo scratchpads via GitHub URLs; the skill maps those back to local files via its `config.json` so reads stay on-disk. The `kanban-sync` skill also handles syncing the board from commit trailers (Mode 1) and composing a commit with a `Kanban:` trailer (Mode 2).
