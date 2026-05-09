@@ -23,7 +23,7 @@ sleep 0.05
 
 class=$(xdotool getactivewindow getwindowclassname 2>/dev/null)
 case "${class,,}" in
-  kitty|alacritty|wezterm|foot|*term*|xterm*)
+  *kitty*|*alacritty*|*wezterm*|*foot*|*term*|*xterm*)
     xdotool key --clearmodifiers ctrl+shift+v
     ;;
   *)
