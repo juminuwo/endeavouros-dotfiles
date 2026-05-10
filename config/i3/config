@@ -112,7 +112,7 @@ bindcode $mod+Shift+15    move container to workspace  $ws6; workspace $ws6
 bindcode $mod+Shift+16    move container to workspace  $ws7; workspace $ws7 
 bindcode $mod+Shift+17    move container to workspace  $ws8; workspace $ws8 
 bindcode $mod+Shift+18    move container to workspace  $ws9; workspace $ws9 
-bindcode $mod+Shift+19    move container to workspace  $ws1; workspace $ws100
+bindcode $mod+Shift+19    move container to workspace  $ws10; workspace $ws10
 
 # move focused container to workspace with numpad keys
 bindcode $mod+Shift+Mod2+87     move container to workspace  $ws1
