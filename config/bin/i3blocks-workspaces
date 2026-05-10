@@ -22,31 +22,35 @@ HIDDEN_RE='^_proj_'
 WS="${1:-}"
 [[ -n "$WS" ]] || { printf '\n'; exit 0; }
 
-# Visible workspaces sorted by num. Output: "<name>\t<focused 0|1>".
+# Visible workspaces sorted by num. Output: "<name>\t<focused 0|1>\t<urgent 0|1>".
 _visible() {
     i3-msg -t get_workspaces 2>/dev/null | jq -r --arg re "$HIDDEN_RE" '
         [ .[] | select(.name | test($re) | not) ]
         | sort_by(.num)
         | .[]
-        | [.name, (.focused | if . then 1 else 0 end)]
+        | [.name,
+           (.focused | if . then 1 else 0 end),
+           (.urgent  | if . then 1 else 0 end)]
         | @tsv
     '
 }
 
 # State for THIS block's workspace.
 focused=0
+urgent=0
 exists=0
-while IFS=$'\t' read -r name foc; do
+while IFS=$'\t' read -r name foc urg; do
     if [[ "$name" == "$WS" ]]; then
         exists=1
         focused="$foc"
+        urgent="$urg"
         break
     fi
 done < <(_visible)
 
 if [[ "${BLOCK_BUTTON:-0}" == "1" ]]; then
     i3-msg -- "workspace ${WS}" >/dev/null 2>&1 || true
-    focused=1; exists=1
+    focused=1; exists=1; urgent=0
 fi
 
 if [[ "$exists" != "1" ]]; then
@@ -54,8 +58,14 @@ if [[ "$exists" != "1" ]]; then
     exit 0
 fi
 
-# Rose Pine palette.
-if [[ "$focused" == "1" ]]; then
+# Rose Pine palette. Urgent wins over focused (stock i3bar behaviour:
+# focusing the urgent ws clears the urgent flag, so the two states don't
+# meaningfully overlap).
+if [[ "$urgent" == "1" ]]; then
+    fg='#191724'  # base
+    bg='#eb6f92'  # love (rose pine red)
+    bd='#eb6f92'
+elif [[ "$focused" == "1" ]]; then
     fg='#191724'  # base
     bg='#c4a7e7'  # iris
     bd='#c4a7e7'  # iris
