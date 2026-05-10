@@ -1,7 +1,11 @@
 #!/bin/bash
 
-# Define the workspaces you want to restore
-WORKSPACES="10 9 8 7 6 5 4 3 2 1"
+# Define the workspaces you want to restore.
+# Workspaces 6 and 7 are reserved for project-switch (kitty terminal pairs
+# managed via marks + workspace renames). i3-resurrect must not touch them
+# — its placeholder swallow rules + bare-kitty respawn collide with the
+# marks project-switch attaches, leaving orphan kittys and broken state.
+WORKSPACES="10 9 8 5 4 3 2 1"
 PROFILE_NAME="windows_switch_session"
 
 echo "Starting i3-resurrect restore process..."
