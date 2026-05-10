@@ -8,6 +8,8 @@ picom
 dunst
 rofi
 dmenu
+clipmenu
+clipnotify
 feh
 arandr
 xss-lock

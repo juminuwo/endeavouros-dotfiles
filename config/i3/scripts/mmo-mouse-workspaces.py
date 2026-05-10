@@ -26,14 +26,28 @@ KEYCODE_TO_WORKSPACE = {
     26:  "8",   # KEY_LEFTBRACE
     102: "9",   # KEY_HOME
     105: "10",  # KEY_LEFT
-    107: "11",  # KEY_END
-    12:  "12",  # KEY_MINUS
+}
+
+# evdev keycode -> shell command (run via /bin/sh -c).
+# Only 10 of the 12 side buttons map to workspaces; the spare two are
+# repurposed as utility actions.
+KEYCODE_TO_COMMAND = {
+    107: "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle",  # KEY_END   — toggle desktop audio
+    12:  "CM_LAUNCHER=rofi clipmenu -i -config $HOME/.config/rofi/rofidmenu.rasi",  # KEY_MINUS — clipboard picker
 }
 
 
 def switch_workspace(ws):
     subprocess.Popen(
         ["i3-msg", f"workspace {ws}"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def run_command(cmd):
+    subprocess.Popen(
+        ["/bin/sh", "-c", cmd],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
@@ -51,6 +65,10 @@ def main():
                     ws = KEYCODE_TO_WORKSPACE.get(event.code)
                     if ws:
                         switch_workspace(ws)
+                        continue
+                    cmd = KEYCODE_TO_COMMAND.get(event.code)
+                    if cmd:
+                        run_command(cmd)
 
         except FileNotFoundError:
             print("Mouse not found, retrying in 5s...", flush=True)

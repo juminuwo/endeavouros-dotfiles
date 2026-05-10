@@ -401,6 +401,11 @@ exec_always --no-startup-id $HOME/.local/bin/project-switch ensure-default
 # refresh i3blocks workspace blocks on every workspace event (no poll lag)
 exec_always --no-startup-id $HOME/.local/bin/i3-workspace-watcher
 
+# clipmenu clipboard manager: clipnotify-driven daemon (picker is `clipmenu`
+# with CM_LAUNCHER=rofi, bound to mouse button 12 in mmo-mouse-workspaces.py).
+# Idempotent guard so i3 reloads don't accumulate duplicate daemons.
+exec_always --no-startup-id sh -c 'pgrep -x clipmenud >/dev/null || clipmenud'
+
 ## compositor
 
 # aka transparency
