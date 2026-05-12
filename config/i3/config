@@ -303,9 +303,6 @@ bindsym Print exec flameshot gui
 # Save clipboard image to file for pasting into Claude Code
 bindsym $mod+Shift+v exec --no-startup-id ~/bin/clip-img
 
-# Paste clipboard with common leading whitespace stripped (for Claude Code / TUI output)
-bindsym Control+Shift+$mod+v exec --no-startup-id ~/bin/paste-dedented
-
 # Project switcher (groups kitty windows on ws6/ws7 into named projects)
 bindsym $mod+y       exec --no-startup-id $HOME/.local/bin/project-switch switch
 bindsym $mod+Shift+y exec --no-startup-id $HOME/.local/bin/project-switch new
