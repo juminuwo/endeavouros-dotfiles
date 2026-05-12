@@ -345,6 +345,10 @@ set $ws10 "10"
 # assign [class="thunderbird"] $ws4
 # assign [class="TelegramDesktop"] $ws5
 
+# pin Chrome (browser + PWAs) to workspace 8
+assign [class="(?i)^(google-)?chrome$"] $ws8
+for_window [class="(?i)^(google-)?chrome$"] focus
+
 # automatic set focus new window if it opens on another workspace than the current:
 # for_window [class=Xfce4-terminal] focus
 # for_window [class=(?i)firefox] focus
