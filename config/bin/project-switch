@@ -104,6 +104,17 @@ _mark_exists() {
     _marks_all | grep -Fxq "$1"
 }
 
+# Print the workspace name a mark currently sits on, or empty if not found.
+_mark_workspace() {
+    local m="$1"
+    i3-msg -t get_tree | jq -r --arg m "$m" '
+        [.. | objects | select(.type == "workspace")]
+        | map(.name as $ws | [.. | objects | select(.window != null and ((.marks // []) | any(. == $m)))]
+            | map($ws))
+        | flatten | .[0] // empty
+    ' 2>/dev/null || true
+}
+
 # Per-user file holding project names in last-accessed order, most recent
 # first. Updated on every successful switch / new / rename. Survives across
 # i3 restarts so the rofi picker doesn't reset to alphabetical on relogin.
@@ -321,7 +332,19 @@ cmd_reconcile() {
     [[ -n "$current" ]] || { _log "reconcile: no current project"; return 0; }
     _dedupe_marks
     for role in claude misc; do
-        if ! _mark_exists "proj:$current:$role"; then
+        local mark="proj:$current:$role"
+        local want_ws; want_ws=$(_ws_for_role "$role")
+        if _mark_exists "$mark"; then
+            # Mark exists — verify it sits on the expected ws6/ws7. If it's
+            # stranded (on its hidden workspace, on the wrong numeric ws, or
+            # anywhere else) pull it back. Otherwise the next switch's rename
+            # collides with the stale hidden workspace and silently aborts.
+            local at_ws; at_ws=$(_mark_workspace "$mark")
+            if [[ "$at_ws" != "$want_ws" ]]; then
+                _log "reconcile: pulling stranded $mark from ws='$at_ws' to ws=$want_ws"
+                i3-msg -- "[con_mark=\"^${mark}\$\"] move container to workspace number ${want_ws}, floating disable" >/dev/null
+            fi
+        else
             if _adopt_on_workspace "$current" "$role"; then
                 _log "reconcile: adopted unmarked kitty for role=$role into $current"
             else
