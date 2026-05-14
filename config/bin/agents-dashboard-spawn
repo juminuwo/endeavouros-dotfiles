@@ -44,6 +44,13 @@ if [ "$agent_kind" = "claude" ] && [ -n "$agent_pid" ] && [ -n "$session_id" ]; 
   echo "$(date -Iseconds) recorded claude pid=$agent_pid -> session=$session_id" >>"$LOG"
 fi
 
+{
+  echo "=== $(date -Iseconds) spawn invoked (pid=$$, agent=$agent_kind, agent_pid=$agent_pid) ==="
+  echo "  KITTY_LISTEN_ON=${KITTY_LISTEN_ON:-<unset>}"
+  echo "  KITTY_WINDOW_ID=${KITTY_WINDOW_ID:-<unset>}"
+  echo "  KITTY_PID=${KITTY_PID:-<unset>}"
+} >>"$LOG"
+
 [ -n "${KITTY_LISTEN_ON:-}" ] || { echo "$(date -Iseconds) no KITTY_LISTEN_ON" >>"$LOG"; exit 0; }
 [ -n "${KITTY_WINDOW_ID:-}" ] || { echo "$(date -Iseconds) no KITTY_WINDOW_ID" >>"$LOG"; exit 0; }
 
@@ -76,7 +83,7 @@ echo "existing=$exists" >>"$LOG"
 # uv is at ~/.local/bin/uv and is needed by the dashboard's shebang.
 # --keep-focus so the dashboard opens in the background — claude tab keeps focus.
 echo "launching: $DASHBOARD_BIN" >>"$LOG"
-kitty @ launch \
+launch_out=$(kitty @ launch \
   --to "$KITTY_LISTEN_ON" \
   --type=tab \
   --tab-title="$DASHBOARD_TITLE" \
@@ -84,5 +91,18 @@ kitty @ launch \
   --match "id:$KITTY_WINDOW_ID" \
   --copy-env \
   --keep-focus \
-  "$DASHBOARD_BIN" >>"$LOG" 2>&1
+  "$DASHBOARD_BIN" 2>&1)
+echo "launch stdout/stderr: $launch_out" >>"$LOG"
+new_win_id="$launch_out"
+echo "  new window id: $new_win_id" >>"$LOG"
+
+# Right after launch, dump the kitty state so we can see where the dashboard
+# actually landed (which OS window) vs. where the codex/claude session is.
+{
+  echo "  post-launch kitty state:"
+  kitty @ ls --to "$KITTY_LISTEN_ON" 2>/dev/null | jq -c \
+    --argjson wid "$KITTY_WINDOW_ID" \
+    --argjson nw "${new_win_id:-0}" \
+    '.[] | {os_window_id: .id, tabs: [.tabs[] | {title: .title, window_ids: [.windows[].id]}], has_caller: any(.tabs[].windows[]; .id==$wid), has_new: any(.tabs[].windows[]; .id==$nw)}' || true
+} >>"$LOG"
 echo "launch rc=$?" >>"$LOG"
