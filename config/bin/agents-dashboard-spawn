@@ -1,41 +1,47 @@
 #!/usr/bin/env bash
 # Spawn an `agents-dashboard` tab as tab 1 in the kitty OS window where a
-# Claude Code session has just started — but only if one isn't already
-# present in that OS window.
+# coding-agent session (Claude Code or Codex CLI) has just started — but
+# only if one isn't already present in that OS window.
 #
-# Wired into Claude Code via a SessionStart hook. Silently exits when not
-# running under a kitty instance with `listen_on` configured.
+# Wired into both harnesses via their respective SessionStart hooks:
+#   - Claude:  ~/.claude/settings.json     (hooks.SessionStart)
+#   - Codex:   ~/.codex/config.toml        ([[hooks.session_start]])
+# Silently exits when not running under a kitty instance with
+# `listen_on` configured.
 
 LOG="/tmp/agents-dashboard-spawn.log"
 
-# Read the hook payload (JSON on stdin) so we can record the
-# claude_pid -> session_id mapping the dashboard uses to disambiguate
-# multiple sessions in the same cwd.
+# Read the hook payload (JSON on stdin). Claude's payload has .session_id
+# which we record so the dashboard can disambiguate multiple sessions in
+# the same cwd. Codex's payload differs and we don't need it — the
+# dashboard looks up Codex threads via ~/.codex/state_5.sqlite.
 payload=$(cat 2>/dev/null || true)
 session_id=""
 if [ -n "$payload" ]; then
   session_id=$(printf '%s' "$payload" | jq -r '.session_id // empty' 2>/dev/null || true)
 fi
 
-# Walk up the process tree to find the parent `claude` process.
-claude_pid=""
+# Walk up the process tree to find the parent agent process (claude|codex).
+agent_pid=""
+agent_kind=""
 walk_pid=$$
 while [ "${walk_pid:-0}" -gt 1 ]; do
   ppid=$(awk '{print $4}' "/proc/$walk_pid/stat" 2>/dev/null) || break
   [ -n "${ppid:-}" ] && [ "$ppid" -gt 1 ] || break
   comm=$(cat "/proc/$ppid/comm" 2>/dev/null) || break
-  if [ "$comm" = "claude" ]; then
-    claude_pid="$ppid"
-    break
-  fi
+  case "$comm" in
+    claude) agent_pid="$ppid"; agent_kind="claude"; break ;;
+    codex)  agent_pid="$ppid"; agent_kind="codex";  break ;;
+  esac
   walk_pid="$ppid"
 done
 
-# Record the mapping for the dashboard to consume.
-if [ -n "$claude_pid" ] && [ -n "$session_id" ]; then
+# Record the claude pid->session_id mapping (codex doesn't need this; the
+# dashboard reads its session id straight from SQLite).
+if [ "$agent_kind" = "claude" ] && [ -n "$agent_pid" ] && [ -n "$session_id" ]; then
   mkdir -p /tmp/claude-sessions 2>/dev/null
-  printf '%s\n' "$session_id" > "/tmp/claude-sessions/$claude_pid"
-  echo "$(date -Iseconds) recorded pid=$claude_pid -> session=$session_id" >>"$LOG"
+  printf '%s\n' "$session_id" > "/tmp/claude-sessions/$agent_pid"
+  echo "$(date -Iseconds) recorded claude pid=$agent_pid -> session=$session_id" >>"$LOG"
 fi
 
 [ -n "${KITTY_LISTEN_ON:-}" ] || { echo "$(date -Iseconds) no KITTY_LISTEN_ON" >>"$LOG"; exit 0; }

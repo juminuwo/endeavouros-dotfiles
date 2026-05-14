@@ -3,10 +3,11 @@
 # requires-python = ">=3.12"
 # dependencies = ["textual>=0.80"]
 # ///
-"""Claude Code session dashboard for Kitty (impala-style cards).
+"""Agent session dashboard for Kitty (impala-style cards).
 
-Lists every running Claude Code session as its own card. Navigate with
-j/k or arrow keys; press Enter to focus that session's kitty tab.
+Lists every running coding-agent session (Claude Code, Codex CLI) as its
+own card. Navigate with j/k or arrow keys; press Enter to focus that
+session's kitty tab.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sqlite3
 import subprocess
 import sys
 import time
@@ -31,8 +33,11 @@ from textual.message import Message
 from textual.reactive import reactive
 from textual.widgets import Footer, Header, Static
 
-PROJECTS_DIR = Path.home() / ".claude" / "projects"
-SESSIONS_DIR = Path("/tmp") / "claude-sessions"
+# Claude Code on-disk layout.
+CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
+CLAUDE_SESSIONS_DIR = Path("/tmp") / "claude-sessions"
+# Codex CLI on-disk layout: a SQLite index of threads + per-thread JSONL rollouts.
+CODEX_STATE_DB = Path.home() / ".codex" / "state_5.sqlite"
 REFRESH_SECONDS = 2.0
 TAIL_BYTES = 200_000
 KITTY_TIMEOUT = 2.0
@@ -91,18 +96,21 @@ def kitty_ls() -> list:
 # --- session discovery ----------------------------------------------------
 
 
-def is_claude_process(proc: dict) -> bool:
+def harness_for_process(proc: dict) -> str | None:
+    """Return 'claude', 'codex', or None for a kitty foreground process."""
     cmdline = proc.get("cmdline") or []
     if not cmdline:
-        return False
+        return None
     base = cmdline[0].rsplit("/", 1)[-1]
     if base == "claude":
-        return True
+        return "claude"
+    if base == "codex":
+        return "codex"
     if base in ("node", "nodejs"):
         for arg in cmdline[1:]:
             if "claude" in arg and ("cli.js" in arg or "/share/claude/" in arg):
-                return True
-    return False
+                return "claude"
+    return None
 
 
 def proc_cwd(pid: int) -> str | None:
@@ -116,9 +124,12 @@ def encode_cwd(path: str) -> str:
     return path.replace("/", "-")
 
 
-def session_id_for_pid(pid: int) -> str | None:
+# --- Claude Code session lookup -------------------------------------------
+
+
+def claude_session_id_for_pid(pid: int) -> str | None:
     """Look up the session-id recorded by the SessionStart hook for this pid."""
-    f = SESSIONS_DIR / str(pid)
+    f = CLAUDE_SESSIONS_DIR / str(pid)
     if not f.is_file():
         return None
     try:
@@ -127,14 +138,14 @@ def session_id_for_pid(pid: int) -> str | None:
         return None
 
 
-def find_session_jsonl_by_id(cwd: str, session_id: str) -> Path | None:
-    j = PROJECTS_DIR / encode_cwd(cwd) / f"{session_id}.jsonl"
+def claude_jsonl_by_id(cwd: str, session_id: str) -> Path | None:
+    j = CLAUDE_PROJECTS_DIR / encode_cwd(cwd) / f"{session_id}.jsonl"
     return j if j.is_file() else None
 
 
-def find_session_jsonl_fallback(cwd: str) -> Path | None:
+def claude_jsonl_fallback(cwd: str) -> Path | None:
     """Most recently modified JSONL in this cwd. Used when no pid mapping exists."""
-    pd = PROJECTS_DIR / encode_cwd(cwd)
+    pd = CLAUDE_PROJECTS_DIR / encode_cwd(cwd)
     if not pd.exists():
         return None
     jsonls = [p for p in pd.glob("*.jsonl") if p.is_file()]
@@ -143,12 +154,12 @@ def find_session_jsonl_fallback(cwd: str) -> Path | None:
     return max(jsonls, key=lambda p: p.stat().st_mtime)
 
 
-def cleanup_stale_session_files() -> None:
+def cleanup_stale_claude_session_files() -> None:
     """Drop pid->session mappings for processes that no longer exist."""
-    if not SESSIONS_DIR.exists():
+    if not CLAUDE_SESSIONS_DIR.exists():
         return
     try:
-        entries = list(SESSIONS_DIR.iterdir())
+        entries = list(CLAUDE_SESSIONS_DIR.iterdir())
     except OSError:
         return
     for f in entries:
@@ -165,14 +176,54 @@ def cleanup_stale_session_files() -> None:
                 pass
 
 
-def find_claude_tabs():
-    cleanup_stale_session_files()
+# --- Codex CLI session lookup ---------------------------------------------
+
+
+def codex_thread_for_cwd(cwd: str) -> tuple[str | None, Path | None]:
+    """Return (thread_id, rollout_path) for the most recently updated thread in cwd.
+
+    Codex maintains an authoritative index in ~/.codex/state_5.sqlite. We don't
+    need a hook-recorded pid mapping (unlike Claude) because the SQLite row
+    appears as soon as Codex starts. Race window: a few ms at startup before
+    the row exists — we just show an empty card in that interval.
+    """
+    if not CODEX_STATE_DB.is_file():
+        return (None, None)
+    try:
+        # uri=read-only so we never accidentally hold a writer lock; immutable=1
+        # would skip WAL traffic which would give us a stale view.
+        con = sqlite3.connect(f"file:{CODEX_STATE_DB}?mode=ro", uri=True, timeout=0.5)
+        try:
+            row = con.execute(
+                "SELECT id, rollout_path FROM threads "
+                "WHERE cwd = ? AND archived = 0 "
+                "ORDER BY updated_at DESC LIMIT 1",
+                (cwd,),
+            ).fetchone()
+        finally:
+            con.close()
+    except sqlite3.Error as e:
+        log.warning("codex sqlite read failed: %s", e)
+        return (None, None)
+    if not row:
+        return (None, None)
+    tid, rp = row
+    p = Path(rp) if rp else None
+    return (tid, p if (p and p.is_file()) else None)
+
+
+# --- per-harness session iteration ----------------------------------------
+
+
+def find_agent_tabs():
+    cleanup_stale_claude_session_files()
     seen_pids: set[int] = set()
     for osw in kitty_ls():
         for tab in osw.get("tabs", []):
             for win in tab.get("windows", []):
                 for proc in win.get("foreground_processes", []):
-                    if not is_claude_process(proc):
+                    harness = harness_for_process(proc)
+                    if not harness:
                         continue
                     pid = proc.get("pid")
                     if not pid or pid in seen_pids:
@@ -180,19 +231,22 @@ def find_claude_tabs():
                     cwd = proc_cwd(pid) or win.get("cwd", "")
                     if not cwd:
                         continue
-                    jsonl: Path | None = None
-                    sid = session_id_for_pid(pid)
-                    if sid:
-                        # Trust the hook mapping. If the session hasn't written
-                        # its JSONL yet (brand-new claude with no messages), we
-                        # show the card with no content — don't fall back to
-                        # the newest-in-cwd file or we'd lie about its state.
-                        jsonl = find_session_jsonl_by_id(cwd, sid)
-                    else:
-                        # No mapping recorded (session predates the hook).
-                        jsonl = find_session_jsonl_fallback(cwd)
+                    jsonl: Path | None
+                    sid: str | None
+                    if harness == "claude":
+                        sid = claude_session_id_for_pid(pid)
+                        if sid:
+                            # Trust the hook mapping. If the session hasn't
+                            # written its JSONL yet, show empty rather than
+                            # lying with newest-in-cwd.
+                            jsonl = claude_jsonl_by_id(cwd, sid)
+                        else:
+                            jsonl = claude_jsonl_fallback(cwd)
+                    else:  # codex
+                        sid, jsonl = codex_thread_for_cwd(cwd)
                     seen_pids.add(pid)
                     yield {
+                        "harness": harness,
                         "tab_id": tab["id"],
                         "cwd": cwd,
                         "jsonl": jsonl,
@@ -213,7 +267,7 @@ def tail_lines(p: Path, max_bytes: int = TAIL_BYTES) -> list[str]:
     return data.decode("utf-8", errors="ignore").split("\n")
 
 
-def session_summary(j: Path) -> dict:
+def claude_session_summary(j: Path) -> dict:
     last_user = last_assistant = last_tool = last_recap = ""
     for line in tail_lines(j):
         if not line.strip():
@@ -263,6 +317,54 @@ def session_summary(j: Path) -> dict:
     }
 
 
+def codex_session_summary(j: Path) -> dict:
+    """Parse a Codex rollout JSONL. Codex uses typed event_msg records:
+    user_message / agent_message; tool calls appear as response_item rows
+    with role=tool or function_call payloads.
+    """
+    last_user = last_assistant = last_tool = ""
+    for line in tail_lines(j):
+        if not line.strip():
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        rt = rec.get("type")
+        payload = rec.get("payload") or {}
+        if rt == "event_msg":
+            et = payload.get("type")
+            if et == "user_message":
+                msg = payload.get("message") or ""
+                if msg and not msg.startswith("<"):
+                    last_user = msg
+            elif et == "agent_message":
+                msg = payload.get("message") or ""
+                if msg:
+                    last_assistant = msg.strip()
+        elif rt == "response_item":
+            # Tool/function calls land as response_item with type=function_call
+            # (shell, apply_patch, MCP tools all flow through this shape).
+            it_type = payload.get("type")
+            if it_type == "function_call":
+                name = payload.get("name") or ""
+                if name:
+                    last_tool = name
+    return {
+        "last_user": last_user,
+        "last_assistant": last_assistant,
+        "last_tool": last_tool,
+        "last_recap": "",  # Codex has no away_summary equivalent today.
+        "mtime": j.stat().st_mtime,
+    }
+
+
+def session_summary(j: Path, harness: str) -> dict:
+    if harness == "codex":
+        return codex_session_summary(j)
+    return claude_session_summary(j)
+
+
 # --- formatting -----------------------------------------------------------
 
 
@@ -298,9 +400,9 @@ def truncate(s: str, n: int) -> str:
 
 def gather_sessions() -> list[dict]:
     out = []
-    for tab in find_claude_tabs():
+    for tab in find_agent_tabs():
         if tab["jsonl"]:
-            s = session_summary(tab["jsonl"])
+            s = session_summary(tab["jsonl"], tab["harness"])
             fresh = False
         else:
             s = {
@@ -314,6 +416,7 @@ def gather_sessions() -> list[dict]:
         out.append(
             {
                 "tab_id": tab["tab_id"],
+                "harness": tab["harness"],
                 "project": Path(tab["cwd"]).name or tab["cwd"],
                 "cwd": tab["cwd"],
                 "summary": s,
@@ -339,11 +442,15 @@ def render_card(session: dict) -> Group:
     recap = sm.get("last_recap") or ""
     show_recap = bool(recap) and not fresh and label in ("idle", "stale")
 
-    # Top row: project (left) + status dot+label (right)
+    # Top row: harness badge + project (left) + status dot+label (right)
     top = Table.grid(expand=True, padding=(0, 0))
     top.add_column(ratio=1)
     top.add_column(justify="right")
-    project_text = Text(session["project"], style="bold #a8c7ff")
+    harness = session.get("harness", "claude")
+    badge_style = "bold #ffb86c" if harness == "codex" else "bold #b89eff"
+    project_text = Text()
+    project_text.append(f"{harness} ", style=badge_style)
+    project_text.append(session["project"], style="bold #a8c7ff")
     status_text = Text()
     status_text.append(f"{dot} ", style=style)
     status_text.append(label, style=style)
@@ -439,7 +546,7 @@ class Dashboard(App):
         Binding("enter", "select", "Switch"),
     ]
 
-    TITLE = "Claude Code"
+    TITLE = "agents"
 
     cursor_index: reactive[int] = reactive(0)
 
@@ -490,7 +597,7 @@ class Dashboard(App):
         if not sessions:
             for child in list(scroll.children):
                 child.remove()
-            scroll.mount(EmptyState("No active Claude Code sessions."))
+            scroll.mount(EmptyState("No active agent sessions."))
             self.cards = []
             self.sub_title = "0 active"
             return

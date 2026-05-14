@@ -15,6 +15,7 @@
     ~/.config/kitty/open-actions.conf: config/open-actions.conf
     ~/.claude/settings.json: config/claude-settings.json
     ~/.claude/keybindings.json: config/claude-keybindings.json
+    ~/.codex/hooks.json: config/codex-hooks.json
     ~/.claude/skills/research-first: config/claude-skills/research-first
     ~/.claude/skills/tech-wiki: config/claude-skills/tech-wiki
     ~/.claude/skills/update-projects: config/claude-skills/update-projects
