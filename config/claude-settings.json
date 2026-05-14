@@ -95,7 +95,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/howis/.local/bin/claude-dashboard-spawn"
+            "command": "/home/howis/.local/bin/agents-dashboard-spawn"
           }
         ]
       }

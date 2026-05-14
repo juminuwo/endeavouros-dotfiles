@@ -36,8 +36,8 @@ SESSIONS_DIR = Path("/tmp") / "claude-sessions"
 REFRESH_SECONDS = 2.0
 TAIL_BYTES = 200_000
 KITTY_TIMEOUT = 2.0
-LOG_PATH = Path("/tmp") / f"claude-dashboard-{os.getuid()}.log"
-CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "claude-dashboard"
+LOG_PATH = Path("/tmp") / f"agents-dashboard-{os.getuid()}.log"
+CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "agents-dashboard"
 THEME_FILE = CONFIG_DIR / "theme"
 
 logging.basicConfig(
@@ -45,7 +45,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
 )
-log = logging.getLogger("claude-dashboard")
+log = logging.getLogger("agents-dashboard")
 
 
 def _log_unhandled(exc_type, exc, tb):

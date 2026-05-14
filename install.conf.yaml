@@ -35,8 +35,8 @@
     ~/.local/bin/restore_i3_session.sh: config/bin/restore_i3_session.sh
     ~/.local/bin/save_i3_session.sh: config/bin/save_i3_session.sh
     ~/.local/bin/soundwire-tray: config/bin/soundwire-tray
-    ~/.local/bin/claude-dashboard: config/bin/claude-dashboard
-    ~/.local/bin/claude-dashboard-spawn: config/bin/claude-dashboard-spawn
+    ~/.local/bin/agents-dashboard: config/bin/agents-dashboard
+    ~/.local/bin/agents-dashboard-spawn: config/bin/agents-dashboard-spawn
     ~/.local/bin/project-switch: config/bin/project-switch
     ~/.local/bin/project-status: config/bin/project-status
     ~/.local/bin/i3blocks-workspaces: config/bin/i3blocks-workspaces
