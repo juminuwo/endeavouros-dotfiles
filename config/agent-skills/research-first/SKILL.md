@@ -1,3 +1,8 @@
+---
+name: research-first
+description: Enforce a research-then-propose-then-implement workflow whenever the task touches domain-specific decisions (pricing models, data formats, API conventions, regulatory requirements, industry workflows). Identifies assumptions, researches authoritative sources, presents a design brief, and waits for approval before coding. Skip for purely mechanical changes (rename, typo, log line).
+---
+
 # Research Before Implementation
 
 When the user asks to implement a feature, enforce a research-then-propose-then-implement workflow. Never jump straight into coding when domain-specific decisions are involved.
