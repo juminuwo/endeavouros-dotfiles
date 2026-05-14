@@ -179,19 +179,65 @@ def cleanup_stale_claude_session_files() -> None:
 # --- Codex CLI session lookup ---------------------------------------------
 
 
-def codex_thread_for_cwd(cwd: str) -> tuple[str | None, Path | None]:
-    """Return (thread_id, rollout_path) for the most recently updated thread in cwd.
-
-    Codex maintains an authoritative index in ~/.codex/state_5.sqlite. We don't
-    need a hook-recorded pid mapping (unlike Claude) because the SQLite row
-    appears as soon as Codex starts. Race window: a few ms at startup before
-    the row exists — we just show an empty card in that interval.
+def codex_rollout_for_pid(pid: int) -> Path | None:
+    """Find the rollout JSONL that this codex process has open as a file
+    descriptor. This disambiguates multiple codex sessions sharing a cwd
+    (the previous "most recently updated in cwd" heuristic collapsed them
+    into one). No hook approval needed — codex always keeps its rollout
+    open for writing.
     """
+    fd_dir = Path(f"/proc/{pid}/fd")
+    try:
+        entries = list(fd_dir.iterdir())
+    except OSError:
+        return None
+    for fd in entries:
+        try:
+            target = os.readlink(fd)
+        except OSError:
+            continue
+        # Codex stores rollouts at ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl
+        if "/.codex/sessions/" in target and target.endswith(".jsonl"):
+            p = Path(target)
+            return p if p.is_file() else None
+    return None
+
+
+def codex_thread_id_for_rollout(rollout: Path) -> str | None:
+    """Look up the SQLite thread id matching this rollout path."""
+    if not CODEX_STATE_DB.is_file():
+        return None
+    try:
+        con = sqlite3.connect(f"file:{CODEX_STATE_DB}?mode=ro", uri=True, timeout=0.5)
+        try:
+            row = con.execute(
+                "SELECT id FROM threads WHERE rollout_path = ? LIMIT 1",
+                (str(rollout),),
+            ).fetchone()
+        finally:
+            con.close()
+    except sqlite3.Error as e:
+        log.warning("codex sqlite read failed: %s", e)
+        return None
+    return row[0] if row else None
+
+
+def codex_session_for_pid(pid: int, cwd: str) -> tuple[str | None, Path | None]:
+    """Return (thread_id, rollout_path) for this codex process.
+
+    Primary path: read /proc/<pid>/fd/ to find the rollout JSONL the
+    process has open — unique per session. Fallback when fd inspection
+    fails (permissions, race at startup): most-recently-updated thread
+    in cwd, which is correct when only one codex per cwd is running.
+    """
+    rollout = codex_rollout_for_pid(pid)
+    if rollout:
+        tid = codex_thread_id_for_rollout(rollout)
+        return (tid, rollout)
+    # Fallback: cwd lookup
     if not CODEX_STATE_DB.is_file():
         return (None, None)
     try:
-        # uri=read-only so we never accidentally hold a writer lock; immutable=1
-        # would skip WAL traffic which would give us a stale view.
         con = sqlite3.connect(f"file:{CODEX_STATE_DB}?mode=ro", uri=True, timeout=0.5)
         try:
             row = con.execute(
@@ -243,7 +289,7 @@ def find_agent_tabs():
                         else:
                             jsonl = claude_jsonl_fallback(cwd)
                     else:  # codex
-                        sid, jsonl = codex_thread_for_cwd(cwd)
+                        sid, jsonl = codex_session_for_pid(pid, cwd)
                     seen_pids.add(pid)
                     yield {
                         "harness": harness,
