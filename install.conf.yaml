@@ -15,6 +15,7 @@
     ~/.config/kitty/open-actions.conf: config/open-actions.conf
     ~/.claude/settings.json: config/claude-settings.json
     ~/.claude/keybindings.json: config/claude-keybindings.json
+    ~/.codex/config.toml: config/codex-config.toml
     ~/.codex/hooks.json: config/codex-hooks.json
     # Skills: dual-symlinked so both Claude Code (~/.claude/skills/) and
     # Codex CLI (~/.agents/skills/) read from the same canonical source dirs.

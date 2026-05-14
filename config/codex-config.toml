@@ -1,0 +1,23 @@
+model = "gpt-5.5"
+model_reasoning_effort = "low"
+approvals_reviewer = "user"
+[projects."/home/howis/git"]
+trust_level = "trusted"
+
+[projects."/tmp"]
+trust_level = "trusted"
+
+[projects."/home/howis"]
+trust_level = "trusted"
+
+[tui.model_availability_nux]
+"gpt-5.5" = 4
+
+[hooks.state]
+
+[hooks.state."/home/howis/.codex/hooks.json:session_start:0:0"]
+enabled = true
+trusted_hash = "sha256:3e47564ba7a1bf08ab0f9eda9e25837c299f8f1a3c213d98861ecc4bf0ebc640"
+
+[hooks.state."/home/howis/.codex/hooks.json:stop:0:0"]
+trusted_hash = "sha256:e936b38e7d8237861544d2b508ebba101d019d1f242c8a577cfeca9961d3518a"
