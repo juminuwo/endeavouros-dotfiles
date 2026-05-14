@@ -28,7 +28,10 @@
     ~/.ssh/config:
       path: config/ssh-config
       create: true
-    ~/git/CLAUDE.md: config/CLAUDE.md
+    ~/git/AGENTS.md: config/AGENTS.md
+    ~/git/CLAUDE.md:
+      path: config/AGENTS.md
+      relink: true
     ~/bin/clip-img: config/clip-img
     ~/bin/claude-notify: config/claude-alerts/claude-notify
     ~/Documents/online-personal/_slides-assets/rose-pine.css: config/slides-themes/rose-pine.css
