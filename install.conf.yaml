@@ -16,12 +16,21 @@
     ~/.claude/settings.json: config/claude-settings.json
     ~/.claude/keybindings.json: config/claude-keybindings.json
     ~/.codex/hooks.json: config/codex-hooks.json
-    ~/.claude/skills/research-first: config/claude-skills/research-first
-    ~/.claude/skills/tech-wiki: config/claude-skills/tech-wiki
-    ~/.claude/skills/update-projects: config/claude-skills/update-projects
-    ~/.claude/skills/obsidian-vault: config/claude-skills/obsidian-vault
-    ~/.claude/skills/kanban-sync: config/claude-skills/kanban-sync
-    ~/.claude/agents/kanban-planner.md: config/claude-agents/kanban-planner.md
+    # Skills: dual-symlinked so both Claude Code (~/.claude/skills/) and
+    # Codex CLI (~/.agents/skills/) read from the same canonical source dirs.
+    ~/.claude/skills/research-first: config/agent-skills/research-first
+    ~/.claude/skills/tech-wiki: config/agent-skills/tech-wiki
+    ~/.claude/skills/update-projects: config/agent-skills/update-projects
+    ~/.claude/skills/obsidian-vault: config/agent-skills/obsidian-vault
+    ~/.claude/skills/kanban-sync: config/agent-skills/kanban-sync
+    ~/.agents/skills/research-first: config/agent-skills/research-first
+    ~/.agents/skills/tech-wiki: config/agent-skills/tech-wiki
+    ~/.agents/skills/update-projects: config/agent-skills/update-projects
+    ~/.agents/skills/obsidian-vault: config/agent-skills/obsidian-vault
+    ~/.agents/skills/kanban-sync: config/agent-skills/kanban-sync
+    # Agents — Claude Code only for now (Codex subagents have a different format,
+    # ported separately in Phase 6).
+    ~/.claude/agents/kanban-planner.md: config/agent-agents/kanban-planner.md
     ~/.config/kitty/current-theme.conf: config/kitty-current-theme.conf
     ~/.config/systemd/user/mmo-mouse-workspaces.service: config/systemd/user/mmo-mouse-workspaces.service
     ~/.gitconfig: config/gitconfig

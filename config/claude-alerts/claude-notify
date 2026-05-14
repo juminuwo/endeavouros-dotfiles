@@ -1,14 +1,15 @@
 #!/bin/bash
 
-# Claude notification script for Linux (i3/EndeavourOS)
-# Displays a desktop notification and plays a sound
+# Agent notification script for Linux (i3/EndeavourOS)
+# Displays a desktop notification and plays a sound.
+# Title lets the same script serve different harnesses (Claude Code, Codex, ...).
 
-# Get the message from environment variable or use default
-MESSAGE="${message:-Claude Code Notification}"
+TITLE="${title:-Claude Code}"
+MESSAGE="${message:-Notification}"
 
 # Display notification using notify-send
 if command -v notify-send &> /dev/null; then
-    notify-send -u normal -t 5000 "Claude Code" "$MESSAGE"
+    notify-send -u normal -t 5000 "$TITLE" "$MESSAGE"
 fi
 
 # Play notification sound
