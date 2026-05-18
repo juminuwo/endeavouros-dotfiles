@@ -484,8 +484,17 @@ cmd_new() {
         _stash_active "$current"
     fi
 
+    # Focus each target workspace before spawning so kitty lands directly on
+    # its destination. Without this, focus stays on the just-stashed hidden
+    # workspace, every spawned kitty flickers there before being moved away,
+    # and the user is never surfaced to the new project — they have to pick
+    # it from rofi to actually see ws6/ws7. Final focus on WS_CLAUDE leaves
+    # the user on the claude pane, matching where `new` is invoked from.
+    i3-msg -- "workspace number ${WS_CLAUDE}" >/dev/null
     _spawn_role "$name" claude
+    i3-msg -- "workspace number ${WS_MISC}" >/dev/null
     _spawn_role "$name" misc
+    i3-msg -- "workspace number ${WS_CLAUDE}" >/dev/null
 
     _history_touch "$name"
     _signal_i3blocks
