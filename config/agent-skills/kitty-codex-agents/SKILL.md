@@ -92,21 +92,23 @@ codex-review-123
 
 ## Spawn an Interactive Codex Tab
 
-Use this when the user wants a live Codex session they can enter and drive:
+Use this when the user wants a live Codex session they can enter and drive. This is the preferred path when the user says "spawn codex" — open the interactive TUI first, then send the task prompt with `send-text` + Enter.
 
 ```bash
-kitty @ launch --type=tab --tab-title '<agent-name>' --var hermes_agent=<agent-name> --cwd <repo-path> --hold zsh -lc 'exec codex'
+kitty @ launch --type=tab --tab-title '<agent-name>' --var hermes_agent=<agent-name> --cwd <repo-path> --env PATH=/home/howis/.local/bin:$PATH --hold /usr/bin/codex
 ```
 
 Example:
 
 ```bash
-kitty @ launch --type=tab --tab-title codex-auth --var hermes_agent=codex-auth --cwd /home/howis/git/my-project --hold zsh -lc 'exec codex'
+kitty @ launch --type=tab --tab-title codex-auth --var hermes_agent=codex-auth --cwd /home/howis/git/my-project --env PATH=/home/howis/.local/bin:$PATH --hold /usr/bin/codex
 ```
 
 Notes:
 
 - The command prints the new kitty window id.
+- Launch `/usr/bin/codex` directly for interactive tabs; avoid wrapping it as `zsh -lc 'exec codex'` unless a shell wrapper is specifically needed.
+- Include `/home/howis/.local/bin` in PATH so project tools such as `uv` are available to commands Codex runs.
 - `--hold` keeps the tab open after Codex exits so the final output is visible.
 - Codex may first ask whether the repository is trusted.
 - If the trust prompt appears, the user can answer in the tab, or Hermes can send the appropriate choice if instructed.
