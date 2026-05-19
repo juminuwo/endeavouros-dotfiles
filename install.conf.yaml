@@ -24,11 +24,13 @@
     ~/.claude/skills/update-projects: config/agent-skills/update-projects
     ~/.claude/skills/obsidian-vault: config/agent-skills/obsidian-vault
     ~/.claude/skills/kanban-sync: config/agent-skills/kanban-sync
+    ~/.claude/skills/kitty-codex-agents: config/agent-skills/kitty-codex-agents
     ~/.agents/skills/research-first: config/agent-skills/research-first
     ~/.agents/skills/tech-wiki: config/agent-skills/tech-wiki
     ~/.agents/skills/update-projects: config/agent-skills/update-projects
     ~/.agents/skills/obsidian-vault: config/agent-skills/obsidian-vault
     ~/.agents/skills/kanban-sync: config/agent-skills/kanban-sync
+    ~/.agents/skills/kitty-codex-agents: config/agent-skills/kitty-codex-agents
     # Agents — Claude reads markdown (.claude/agents/*.md), Codex reads TOML
     # (.codex/agents/*.toml). Formats differ, so we maintain both. The Codex
     # version is generated from the Claude one via /tmp/agent-port.py and
