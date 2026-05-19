@@ -5,9 +5,9 @@
 # ///
 """Agent session dashboard for Kitty (impala-style cards).
 
-Lists every running coding-agent session (Claude Code, Codex CLI) as its
-own card. Navigate with j/k or arrow keys; press Enter to focus that
-session's kitty tab.
+Lists active agent sessions (Claude Code, Codex CLI, Hermes) as cards.
+Navigate with j/k or arrow keys; press Enter to focus local kitty-backed
+sessions when a tab is known.
 """
 
 from __future__ import annotations
@@ -38,6 +38,9 @@ CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
 CLAUDE_SESSIONS_DIR = Path("/tmp") / "claude-sessions"
 # Codex CLI on-disk layout: a SQLite index of threads + per-thread JSONL rollouts.
 CODEX_STATE_DB = Path.home() / ".codex" / "state_5.sqlite"
+# Hermes on-disk layout: SQLite session store shared by CLI and gateways.
+HERMES_HOME = Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes")
+HERMES_STATE_DB = HERMES_HOME / "state.db"
 REFRESH_SECONDS = 2.0
 TAIL_BYTES = 200_000
 KITTY_TIMEOUT = 2.0
@@ -97,7 +100,7 @@ def kitty_ls() -> list:
 
 
 def harness_for_process(proc: dict) -> str | None:
-    """Return 'claude', 'codex', or None for a kitty foreground process."""
+    """Return 'claude', 'codex', 'hermes', or None for a kitty foreground process."""
     cmdline = proc.get("cmdline") or []
     if not cmdline:
         return None
@@ -106,10 +109,15 @@ def harness_for_process(proc: dict) -> str | None:
         return "claude"
     if base == "codex":
         return "codex"
+    if base in ("hermes", "tirith"):
+        return "hermes"
     if base in ("node", "nodejs"):
         for arg in cmdline[1:]:
             if "claude" in arg and ("cli.js" in arg or "/share/claude/" in arg):
                 return "claude"
+    for arg in cmdline[1:]:
+        if arg.endswith("/hermes") or "hermes_cli" in arg:
+            return "hermes"
     return None
 
 
@@ -258,6 +266,33 @@ def codex_session_for_pid(pid: int, cwd: str) -> tuple[str | None, Path | None]:
     return (tid, p if (p and p.is_file()) else None)
 
 
+# --- Hermes session lookup -------------------------------------------------
+
+
+def hermes_jsonl_for_pid(pid: int) -> Path | None:
+    """Find the Hermes session JSONL that this foreground CLI process has open."""
+    fd_dir = Path(f"/proc/{pid}/fd")
+    try:
+        entries = list(fd_dir.iterdir())
+    except OSError:
+        return None
+    sessions_dir = HERMES_HOME / "sessions"
+    for fd in entries:
+        try:
+            target = os.readlink(fd)
+        except OSError:
+            continue
+        p = Path(target)
+        if p.parent == sessions_dir and p.suffix == ".jsonl" and p.is_file():
+            return p
+    return None
+
+
+def hermes_session_for_pid(pid: int) -> tuple[str | None, Path | None]:
+    jsonl = hermes_jsonl_for_pid(pid)
+    return (jsonl.stem, jsonl) if jsonl else (None, None)
+
+
 # --- per-harness session iteration ----------------------------------------
 
 
@@ -288,8 +323,10 @@ def find_agent_tabs():
                             jsonl = claude_jsonl_by_id(cwd, sid)
                         else:
                             jsonl = claude_jsonl_fallback(cwd)
-                    else:  # codex
+                    elif harness == "codex":
                         sid, jsonl = codex_session_for_pid(pid, cwd)
+                    else:  # hermes
+                        sid, jsonl = hermes_session_for_pid(pid)
                     seen_pids.add(pid)
                     yield {
                         "harness": harness,
@@ -405,9 +442,102 @@ def codex_session_summary(j: Path) -> dict:
     }
 
 
+def hermes_session_summary(j: Path) -> dict:
+    """Return a Hermes CLI session summary from the SQLite state store."""
+    if not HERMES_STATE_DB.is_file():
+        return {
+            "last_user": "",
+            "last_assistant": "",
+            "last_tool": "",
+            "last_recap": "",
+            "mtime": j.stat().st_mtime,
+        }
+    session_id = j.stem
+    try:
+        con = sqlite3.connect(f"file:{HERMES_STATE_DB}?mode=ro", uri=True, timeout=0.5)
+        con.row_factory = sqlite3.Row
+        try:
+            row = con.execute(
+                """
+                SELECT
+                    s.id,
+                    s.source,
+                    s.model,
+                    s.started_at,
+                    s.title,
+                    s.message_count,
+                    s.tool_call_count,
+                    COALESCE(MAX(m.timestamp), s.started_at) AS last_active,
+                    (
+                        SELECT content FROM messages
+                        WHERE session_id = s.id
+                          AND role = 'user'
+                          AND COALESCE(content, '') != ''
+                        ORDER BY timestamp DESC
+                        LIMIT 1
+                    ) AS last_user,
+                    (
+                        SELECT content FROM messages
+                        WHERE session_id = s.id
+                          AND role = 'assistant'
+                          AND COALESCE(content, '') != ''
+                        ORDER BY timestamp DESC
+                        LIMIT 1
+                    ) AS last_assistant,
+                    (
+                        SELECT tool_name FROM messages
+                        WHERE session_id = s.id
+                          AND role = 'tool'
+                          AND COALESCE(tool_name, '') != ''
+                        ORDER BY timestamp DESC
+                        LIMIT 1
+                    ) AS last_tool
+                FROM sessions s
+                LEFT JOIN messages m ON m.session_id = s.id
+                WHERE s.id = ?
+                GROUP BY s.id
+                LIMIT 1
+                """,
+                (session_id,),
+            ).fetchone()
+        finally:
+            con.close()
+    except sqlite3.Error as e:
+        log.warning("hermes sqlite read failed: %s", e)
+        row = None
+
+    if not row:
+        return {
+            "last_user": "",
+            "last_assistant": "",
+            "last_tool": "",
+            "last_recap": "",
+            "mtime": j.stat().st_mtime,
+        }
+
+    activity_bits = []
+    if row["model"]:
+        activity_bits.append(row["model"])
+    if row["message_count"]:
+        activity_bits.append(f"{row['message_count']} msgs")
+    if row["tool_call_count"]:
+        activity_bits.append(f"{row['tool_call_count']} tools")
+    activity = " · ".join(activity_bits)
+    return {
+        "last_user": row["last_user"] or "",
+        "last_assistant": row["last_assistant"] or activity,
+        "last_tool": row["last_tool"] or "",
+        "last_recap": "",
+        "mtime": row["last_active"] or row["started_at"] or j.stat().st_mtime,
+        "title": row["title"] or row["source"] or "hermes",
+    }
+
+
 def session_summary(j: Path, harness: str) -> dict:
     if harness == "codex":
         return codex_session_summary(j)
+    if harness == "hermes":
+        return hermes_session_summary(j)
     return claude_session_summary(j)
 
 
@@ -459,17 +589,20 @@ def gather_sessions() -> list[dict]:
                 "mtime": time.time(),
             }
             fresh = True
+        project = Path(tab["cwd"]).name or tab["cwd"]
+        if tab["harness"] == "hermes":
+            project = s.get("title") or project
         out.append(
             {
                 "tab_id": tab["tab_id"],
                 "harness": tab["harness"],
-                "project": Path(tab["cwd"]).name or tab["cwd"],
+                "project": project,
                 "cwd": tab["cwd"],
                 "summary": s,
                 "fresh": fresh,
             }
         )
-    return out
+    return sorted(out, key=lambda s: s["summary"]["mtime"], reverse=True)
 
 
 def render_card(session: dict) -> Group:
@@ -493,7 +626,12 @@ def render_card(session: dict) -> Group:
     top.add_column(ratio=1)
     top.add_column(justify="right")
     harness = session.get("harness", "claude")
-    badge_style = "bold #ffb86c" if harness == "codex" else "bold #b89eff"
+    if harness == "codex":
+        badge_style = "bold #ffb86c"
+    elif harness == "hermes":
+        badge_style = "bold #80cbc4"
+    else:
+        badge_style = "bold #b89eff"
     project_text = Text()
     project_text.append(f"{harness} ", style=badge_style)
     project_text.append(session["project"], style="bold #a8c7ff")
@@ -688,6 +826,9 @@ class Dashboard(App):
         if not self.cards or self.cursor_index >= len(self.sessions):
             return
         tab_id = self.sessions[self.cursor_index]["tab_id"]
+        if tab_id is None:
+            self.notify("No kitty tab is attached to this session.", severity="information")
+            return
         try:
             subprocess.run(
                 kitty_cmd("focus-tab", "--match", f"id:{tab_id}"),
