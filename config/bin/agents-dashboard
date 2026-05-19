@@ -15,10 +15,12 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import sqlite3
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 from rich.console import Group
@@ -41,6 +43,7 @@ CODEX_STATE_DB = Path.home() / ".codex" / "state_5.sqlite"
 # Hermes on-disk layout: SQLite session store shared by CLI and gateways.
 HERMES_HOME = Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes")
 HERMES_STATE_DB = HERMES_HOME / "state.db"
+HERMES_LOG_PATH = HERMES_HOME / "logs" / "agent.log"
 REFRESH_SECONDS = 2.0
 TAIL_BYTES = 200_000
 KITTY_TIMEOUT = 2.0
@@ -54,6 +57,8 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
 )
 log = logging.getLogger("agents-dashboard")
+HERMES_SESSION_RE = re.compile(r"\[(\d{8}_\d{6}_[0-9a-fA-F]+)\]")
+HERMES_LOG_TS_RE = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),(\d{3})")
 
 
 def _log_unhandled(exc_type, exc, tb):
@@ -126,6 +131,23 @@ def proc_cwd(pid: int) -> str | None:
         return os.readlink(f"/proc/{pid}/cwd")
     except OSError:
         return None
+
+
+def proc_start_time(pid: int) -> float | None:
+    """Return process start time as a Unix timestamp."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+        rparen = stat.rfind(")")
+        fields = stat[rparen + 2 :].split()
+        start_ticks = int(fields[19])
+        ticks_per_second = os.sysconf(os.sysconf_names["SC_CLK_TCK"])
+        for line in Path("/proc/stat").read_text().splitlines():
+            if line.startswith("btime "):
+                boot_time = int(line.split()[1])
+                return boot_time + (start_ticks / ticks_per_second)
+    except (OSError, ValueError, IndexError, KeyError):
+        return None
+    return None
 
 
 def encode_cwd(path: str) -> str:
@@ -266,33 +288,6 @@ def codex_session_for_pid(pid: int, cwd: str) -> tuple[str | None, Path | None]:
     return (tid, p if (p and p.is_file()) else None)
 
 
-# --- Hermes session lookup -------------------------------------------------
-
-
-def hermes_jsonl_for_pid(pid: int) -> Path | None:
-    """Find the Hermes session JSONL that this foreground CLI process has open."""
-    fd_dir = Path(f"/proc/{pid}/fd")
-    try:
-        entries = list(fd_dir.iterdir())
-    except OSError:
-        return None
-    sessions_dir = HERMES_HOME / "sessions"
-    for fd in entries:
-        try:
-            target = os.readlink(fd)
-        except OSError:
-            continue
-        p = Path(target)
-        if p.parent == sessions_dir and p.suffix == ".jsonl" and p.is_file():
-            return p
-    return None
-
-
-def hermes_session_for_pid(pid: int) -> tuple[str | None, Path | None]:
-    jsonl = hermes_jsonl_for_pid(pid)
-    return (jsonl.stem, jsonl) if jsonl else (None, None)
-
-
 # --- per-harness session iteration ----------------------------------------
 
 
@@ -326,9 +321,10 @@ def find_agent_tabs():
                     elif harness == "codex":
                         sid, jsonl = codex_session_for_pid(pid, cwd)
                     else:  # hermes
-                        sid, jsonl = hermes_session_for_pid(pid)
+                        sid, summary = hermes_session_for_pid(pid)
+                        jsonl = None
                     seen_pids.add(pid)
-                    yield {
+                    tab_info = {
                         "harness": harness,
                         "tab_id": tab["id"],
                         "cwd": cwd,
@@ -336,6 +332,9 @@ def find_agent_tabs():
                         "session_id": sid,
                         "pid": pid,
                     }
+                    if harness == "hermes":
+                        tab_info["summary"] = summary
+                    yield tab_info
                     break
 
 
@@ -442,17 +441,43 @@ def codex_session_summary(j: Path) -> dict:
     }
 
 
-def hermes_session_summary(j: Path) -> dict:
-    """Return a Hermes CLI session summary from the SQLite state store."""
+def _parse_hermes_log_timestamp(line: str) -> float | None:
+    match = HERMES_LOG_TS_RE.match(line)
+    if not match:
+        return None
+    try:
+        dt = datetime.strptime(
+            f"{match.group(1)}.{match.group(2)}", "%Y-%m-%d %H:%M:%S.%f"
+        )
+    except ValueError:
+        return None
+    return dt.timestamp()
+
+
+def hermes_log_session_ids_since(start_time: float | None) -> list[str]:
+    """Return newest unique Hermes session ids seen in logs after start_time."""
+    ids: list[str] = []
+    seen: set[str] = set()
+    cutoff = (start_time - 5.0) if start_time is not None else None
+    for line in reversed(tail_lines(HERMES_LOG_PATH)):
+        if cutoff is not None:
+            ts = _parse_hermes_log_timestamp(line)
+            if ts is None or ts < cutoff:
+                continue
+        match = HERMES_SESSION_RE.search(line)
+        if not match:
+            continue
+        sid = match.group(1)
+        if sid in seen:
+            continue
+        ids.append(sid)
+        seen.add(sid)
+    return ids
+
+
+def _hermes_session_row(session_id: str) -> sqlite3.Row | None:
     if not HERMES_STATE_DB.is_file():
-        return {
-            "last_user": "",
-            "last_assistant": "",
-            "last_tool": "",
-            "last_recap": "",
-            "mtime": j.stat().st_mtime,
-        }
-    session_id = j.stem
+        return None
     try:
         con = sqlite3.connect(f"file:{HERMES_STATE_DB}?mode=ro", uri=True, timeout=0.5)
         con.row_factory = sqlite3.Row
@@ -495,6 +520,8 @@ def hermes_session_summary(j: Path) -> dict:
                 FROM sessions s
                 LEFT JOIN messages m ON m.session_id = s.id
                 WHERE s.id = ?
+                  AND s.ended_at IS NULL
+                  AND s.source = 'cli'
                 GROUP BY s.id
                 LIMIT 1
                 """,
@@ -504,17 +531,70 @@ def hermes_session_summary(j: Path) -> dict:
             con.close()
     except sqlite3.Error as e:
         log.warning("hermes sqlite read failed: %s", e)
-        row = None
+        return None
+    return row
 
-    if not row:
-        return {
-            "last_user": "",
-            "last_assistant": "",
-            "last_tool": "",
-            "last_recap": "",
-            "mtime": j.stat().st_mtime,
-        }
 
+def _latest_hermes_cli_session_row() -> sqlite3.Row | None:
+    if not HERMES_STATE_DB.is_file():
+        return None
+    try:
+        con = sqlite3.connect(f"file:{HERMES_STATE_DB}?mode=ro", uri=True, timeout=0.5)
+        con.row_factory = sqlite3.Row
+        try:
+            row = con.execute(
+                """
+                SELECT
+                    s.id,
+                    s.source,
+                    s.model,
+                    s.started_at,
+                    s.title,
+                    s.message_count,
+                    s.tool_call_count,
+                    COALESCE(MAX(m.timestamp), s.started_at) AS last_active,
+                    (
+                        SELECT content FROM messages
+                        WHERE session_id = s.id
+                          AND role = 'user'
+                          AND COALESCE(content, '') != ''
+                        ORDER BY timestamp DESC
+                        LIMIT 1
+                    ) AS last_user,
+                    (
+                        SELECT content FROM messages
+                        WHERE session_id = s.id
+                          AND role = 'assistant'
+                          AND COALESCE(content, '') != ''
+                        ORDER BY timestamp DESC
+                        LIMIT 1
+                    ) AS last_assistant,
+                    (
+                        SELECT tool_name FROM messages
+                        WHERE session_id = s.id
+                          AND role = 'tool'
+                          AND COALESCE(tool_name, '') != ''
+                        ORDER BY timestamp DESC
+                        LIMIT 1
+                    ) AS last_tool
+                FROM sessions s
+                LEFT JOIN messages m ON m.session_id = s.id
+                WHERE s.ended_at IS NULL
+                  AND s.source = 'cli'
+                GROUP BY s.id
+                ORDER BY last_active DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        finally:
+            con.close()
+    except sqlite3.Error as e:
+        log.warning("hermes sqlite read failed: %s", e)
+        return None
+    return row
+
+
+def _hermes_summary_from_row(row: sqlite3.Row) -> dict:
     activity_bits = []
     if row["model"]:
         activity_bits.append(row["model"])
@@ -528,16 +608,31 @@ def hermes_session_summary(j: Path) -> dict:
         "last_assistant": row["last_assistant"] or activity,
         "last_tool": row["last_tool"] or "",
         "last_recap": "",
-        "mtime": row["last_active"] or row["started_at"] or j.stat().st_mtime,
+        "mtime": row["last_active"] or row["started_at"] or time.time(),
         "title": row["title"] or row["source"] or "hermes",
     }
+
+
+def hermes_session_for_pid(pid: int) -> tuple[str | None, dict | None]:
+    """Resolve a live Hermes CLI process to its state.db session summary.
+
+    Hermes no longer keeps a per-session JSONL open in current builds. The CLI
+    writes tagged log lines with the session id, while messages live in state.db.
+    """
+    start_time = proc_start_time(pid)
+    for sid in hermes_log_session_ids_since(start_time):
+        row = _hermes_session_row(sid)
+        if row:
+            return sid, _hermes_summary_from_row(row)
+    row = _latest_hermes_cli_session_row()
+    if row:
+        return row["id"], _hermes_summary_from_row(row)
+    return (None, None)
 
 
 def session_summary(j: Path, harness: str) -> dict:
     if harness == "codex":
         return codex_session_summary(j)
-    if harness == "hermes":
-        return hermes_session_summary(j)
     return claude_session_summary(j)
 
 
@@ -576,8 +671,16 @@ def truncate(s: str, n: int) -> str:
 
 def gather_sessions() -> list[dict]:
     out = []
+    seen_hermes_session_ids: set[str] = set()
     for tab in find_agent_tabs():
-        if tab["jsonl"]:
+        if tab["harness"] == "hermes" and tab.get("summary"):
+            if tab.get("session_id") in seen_hermes_session_ids:
+                continue
+            if tab.get("session_id"):
+                seen_hermes_session_ids.add(tab["session_id"])
+            s = tab["summary"]
+            fresh = False
+        elif tab["jsonl"]:
             s = session_summary(tab["jsonl"], tab["harness"])
             fresh = False
         else:
@@ -596,6 +699,7 @@ def gather_sessions() -> list[dict]:
             {
                 "tab_id": tab["tab_id"],
                 "harness": tab["harness"],
+                "session_id": tab.get("session_id"),
                 "project": project,
                 "cwd": tab["cwd"],
                 "summary": s,
