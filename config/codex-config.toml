@@ -1,6 +1,8 @@
 model = "gpt-5.5"
 model_reasoning_effort = "medium"
 approvals_reviewer = "user"
+sandbox_mode = "workspace-write"
+approval_policy = "never"
 [projects."/home/howis/git"]
 trust_level = "trusted"
 
