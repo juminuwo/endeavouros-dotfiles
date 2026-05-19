@@ -17,7 +17,7 @@ This repo is the source of truth for system config (i3, Kitty, zsh, Claude Code,
 | A portable dependency | `config/packages-repo.txt` (pacman) or `config/packages-aur.txt` (AUR). Decide with `pacman -Si <pkg>`: `Repository: extra/core/multilib` → repo file; `Repository: aur` (or not found) → AUR file. | run `./install-packages` |
 | A hardware-specific package (NVIDIA, Intel ucode, etc.) | `config/host/packages-host-repo.txt` | run `./host-install` |
 | A systemd unit | `config/host/systemd/{system,user}/` | extend `host-install`, re-run it |
-| A Claude Code skill | `config/claude-skills/<name>/SKILL.md` | add `link:` entry pointing at `~/.claude/skills/<name>` |
+| A shared agent skill | `config/agent-skills/<name>/SKILL.md` | Claude/Codex are linked via `install.conf.yaml`; Hermes reads the whole directory through `skills.external_dirs`. Run `./install`, then restart agents or reload skills. |
 
 ## Conventions
 
@@ -29,6 +29,13 @@ This repo is the source of truth for system config (i3, Kitty, zsh, Claude Code,
 - After editing an i3blocks block script (`config/bin/i3blocks-*`), signal i3blocks to re-run the block: `pkill -RTMIN+<N> i3blocks` where `<N>` matches the block's `signal=` line in `config/i3/i3blocks.conf`. Without this, the bar shows cached output until its `interval` ticks.
 - **Workspaces 6 and 7 are reserved for project-switch** (kitty pairs managed via i3 marks + workspace renames). Nothing else should spawn windows there — including i3-resurrect, scratchpad rules, or `for_window` placements. Adding such a rule collides with project-switch's mark/rename state and silently breaks project switching.
 - Don't hand-write files into `~` when a dotbot-managed equivalent exists — edit the source under `config/` instead.
+
+## Shared agent skills
+
+- `config/agent-skills/` is the canonical source for personal workflow/domain skills shared by Claude Code, Codex, and Hermes.
+- Claude Code uses `~/.claude/skills/<name>` symlinks; Codex uses `~/.agents/skills/<name>` symlinks; Hermes reads `config/agent-skills/` via `skills.external_dirs`.
+- Keep skill instructions agent-neutral where possible. Prefer canonical repo paths over `~/.claude/skills/...` paths when referencing bundled scripts or references.
+- When adding a new skill, add the source directory under `config/agent-skills/`, add Claude/Codex symlinks in `install.conf.yaml`, run `./install`, then verify with the target agent's skill list/reload command.
 
 ## Two CLAUDE.md files in this repo
 

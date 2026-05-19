@@ -47,7 +47,7 @@ If ambiguous, ask. Better to clarify than to commit something the user didn't in
 User said "sync the kanban", "update the board", `/kanban-sync`. They've already committed and want the board to catch up. Just run:
 
 ```bash
-python3 ~/.claude/skills/kanban-sync/scripts/sync.py
+python3 ~/git/endeavouros-dotfiles/config/agent-skills/kanban-sync/scripts/sync.py
 ```
 
 Pure stdlib — no Python deps needed.
@@ -130,7 +130,7 @@ Follow normal commit safety rules — never `--no-verify`, never bypass hooks, n
 ### Step 6 — run sync
 
 ```bash
-python3 ~/.claude/skills/kanban-sync/scripts/sync.py
+python3 ~/git/endeavouros-dotfiles/config/agent-skills/kanban-sync/scripts/sync.py
 ```
 
 Report back: what got committed, the SHA, the cards that moved, any WIP warning.

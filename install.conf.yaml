@@ -17,8 +17,8 @@
     ~/.claude/keybindings.json: config/claude-keybindings.json
     ~/.codex/config.toml: config/codex-config.toml
     ~/.codex/hooks.json: config/codex-hooks.json
-    # Skills: dual-symlinked so both Claude Code (~/.claude/skills/) and
-    # Codex CLI (~/.agents/skills/) read from the same canonical source dirs.
+    # Skills: Claude Code and Codex get per-skill symlinks; Hermes reads the
+    # same canonical source dir via skills.external_dirs configured below.
     ~/.claude/skills/research-first: config/agent-skills/research-first
     ~/.claude/skills/tech-wiki: config/agent-skills/tech-wiki
     ~/.claude/skills/update-projects: config/agent-skills/update-projects
@@ -66,3 +66,4 @@
 
 - shell:
   - [git submodule update --init --recursive, Installing submodules]
+  - [command -v hermes >/dev/null 2>&1 && hermes config set skills.external_dirs ~/git/endeavouros-dotfiles/config/agent-skills || true, Configuring Hermes skill source]

@@ -1,5 +1,5 @@
 model = "gpt-5.5"
-model_reasoning_effort = "low"
+model_reasoning_effort = "medium"
 approvals_reviewer = "user"
 [projects."/home/howis/git"]
 trust_level = "trusted"
@@ -9,6 +9,12 @@ trust_level = "trusted"
 
 [projects."/home/howis"]
 trust_level = "trusted"
+
+[projects."/home/howis/git/driver-shield"]
+trust_level = "trusted"
+
+[tui]
+session_picker_view = "comfortable"
 
 [tui.model_availability_nux]
 "gpt-5.5" = 4
@@ -21,3 +27,6 @@ trusted_hash = "sha256:3e47564ba7a1bf08ab0f9eda9e25837c299f8f1a3c213d98861ecc4bf
 
 [hooks.state."/home/howis/.codex/hooks.json:stop:0:0"]
 trusted_hash = "sha256:e936b38e7d8237861544d2b508ebba101d019d1f242c8a577cfeca9961d3518a"
+
+[plugins."gmail@openai-curated"]
+enabled = true

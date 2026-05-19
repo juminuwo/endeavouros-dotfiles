@@ -7,7 +7,7 @@
    - `archive_dir` (where Done cards >30 days get moved)
    - `projects.<key>.repo_path` × 5 (local repo locations for each tracked project)
 
-2. **`SKILL.md`** invocation examples reference `~/.claude/skills/kanban-sync/scripts/sync.py`. If your `~/.claude/skills/` lives elsewhere, update.
+2. **`SKILL.md`** invocation examples reference `~/git/endeavouros-dotfiles/config/agent-skills/kanban-sync/scripts/sync.py`. If your dotfiles checkout lives elsewhere, update.
 
 3. **`projects.<key>.github_url`** in `config.json` — currently points at `Imoto-Labs/<repo>` on GitHub. Update if forking or using a different org.
 

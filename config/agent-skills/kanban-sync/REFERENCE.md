@@ -59,7 +59,7 @@ The skill is designed for manual invocation. For automatic sync per commit:
 ```bash
 # .git/hooks/post-commit
 #!/usr/bin/env bash
-python3 ~/.claude/skills/kanban-sync/scripts/sync.py --repo "$(basename $(git rev-parse --show-toplevel))" --quiet &
+python3 ~/git/endeavouros-dotfiles/config/agent-skills/kanban-sync/scripts/sync.py --repo "$(basename $(git rev-parse --show-toplevel))" --quiet &
 ```
 
 Don't enable by default — WIP/amend/rebase churn produces noisy partial states. Manual sync at meaningful checkpoints is the recommended pattern.

@@ -19,6 +19,7 @@ This file is the canonical `AGENTS.md` for the user's `~/git/` tree and is symli
 - Git repos live in `~/git/`
 - Each project has its own `CLAUDE.md` for project-specific commands and structure
 - Python projects use `uv` with `.venv` in the project directory
+- Shared personal agent skills live in `~/git/endeavouros-dotfiles/config/agent-skills/`. Claude/Codex use symlinks; Hermes reads the directory via `skills.external_dirs`.
 
 ## Obsidian Vault
 The vault lives at `~/Documents/online-personal/`. For any vault-related task, the `obsidian-vault` skill loads the full structure, conventions, and publishing flow on trigger — don't duplicate vault content here.
@@ -45,3 +46,4 @@ Imoto Labs is positioned as a **3PL technology company** sitting between carrier
 ## Tool gotchas
 - **Codex hooks need `/hooks` approval and are hash-pinned.** New hooks in `~/.codex/hooks.json` (or inline in `config.toml`) silently don't fire until the user explicitly approves each command via `/hooks` in an interactive Codex session. Approvals are recorded as `trusted_hash = "sha256:…"` under `[hooks.state."<file>:<event>:<group>:<idx>"]` in `~/.codex/config.toml`. **Any** edit to `hooks.json` (cosmetic, matcher change, reorder) changes the canonical hash and silently invalidates the approval — re-approval required. After editing hooks, always tell the user to re-run `/hooks`.
 - **No `co`/`cx` wrapper for Codex.** Codex CLI renames the kitty tab natively, so no parallel to the `cc` zsh function is needed. The `cc` function in `endeavouros-dotfiles/config/zshrc` exists *only* because Claude Code doesn't rename the tab itself.
+- **Shared skill tool-name mapping for Hermes:** Bash → `terminal`, Read → `read_file`, Write → `write_file`, Edit → `patch`, Glob/Grep → `search_files`, WebFetch/WebSearch → web/search tools, Agent → `delegate_task`.
