@@ -155,8 +155,11 @@ The user pushes when they're ready. Don't `git push` as part of this skill.
 
 - **Repo not in config**: warn, ask if they want to add it. Don't compose a trailer for an untracked project.
 - **User wants to commit without touching the board**: respect that — skip the trailer, normal commit, no sync.
+- **Work is already committed but missing/needs trailers**: if `git status --branch --short` shows the branch ahead of remote and the latest commit is clearly the just-finished work, inspect `git log -1 --format='%H%n%B'` and `git show --stat --format=fuller HEAD`. With explicit user intent to close/create board cards, amend the unpushed commit to add/update `Kanban:` trailers, then run sync. Do not create a second empty/docs-only commit just to move the board. If the commit is already pushed, do not rewrite it unless the user explicitly asks for a force-push-safe amend; otherwise add a follow-up commit with the trailers.
+- **User explicitly asks to push after the Kanban commit/amend**: pushing is allowed because the user asked. Still verify `git status --branch --short` and push only the current branch to its configured remote (for example `git push origin master`), then verify the remote SHA. The default rule remains: never push automatically as part of `/kanban-sync` when the user did not request it.
 - **`Kanban: new` with no quoted title**: shlex-fail. Always quote: `Kanban: new "Some title" #tags`.
 - **Card already in target column**: still fine — trailer becomes a commit-link append, no move.
+- **Follow-up commits for an active Kanban card**: if the current work is already tied to a card created/moved earlier in the session, do not make trailer-less follow-up commits even for docs or benchmark notes. Add a link-only trailer such as `Kanban: DSH-049` so `sync.py` appends the commit to the card. If the commit was already pushed without a trailer, do not rewrite public history; manually patch the card's `Commits:` line after verifying the full SHA and URL.
 - **Staged changes span multiple cards**: emit multiple `Kanban:` trailers, one per card.
 - **User typed a trailer in their staged commit message** (via editor): don't add a duplicate. Inspect their draft first.
 

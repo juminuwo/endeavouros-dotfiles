@@ -50,9 +50,12 @@ docker-compose
 python
 python-pip
 python-pipx
+python-beautifulsoup4
 python-defusedxml
 python-evdev
+python-html5lib
 python-jinja
+python-lxml
 python-packaging
 python-pyqt6
 jq
