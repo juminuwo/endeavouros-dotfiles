@@ -57,6 +57,7 @@
     ~/.local/bin/agents-dashboard: config/bin/agents-dashboard
     ~/.local/bin/agents-dashboard-spawn: config/bin/agents-dashboard-spawn
     ~/.local/bin/backup-hermes-restic: config/bin/backup-hermes-restic
+    ~/.local/bin/hermes-notify-hook: config/bin/hermes-notify-hook
     ~/.local/bin/project-switch: config/bin/project-switch
     ~/.local/bin/project-status: config/bin/project-status
     ~/.local/bin/i3blocks-workspaces: config/bin/i3blocks-workspaces
