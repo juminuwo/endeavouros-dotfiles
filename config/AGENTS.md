@@ -17,9 +17,9 @@ This file is the canonical `AGENTS.md` for the user's `~/git/` tree and is symli
 
 ## Conventions
 - Git repos live in `~/git/`
-- Each project has its own `CLAUDE.md` for project-specific commands and structure
+- Each project can have its own `AGENTS.md` and/or `CLAUDE.md` for project-specific commands and structure
 - Python projects use `uv` with `.venv` in the project directory
-- Shared personal agent skills live in `~/git/endeavouros-dotfiles/config/agent-skills/`. Claude/Codex use symlinks; Hermes reads the directory via `skills.external_dirs`.
+- Shared personal agent skills live in `~/git/endeavouros-dotfiles/config/agent-skills/`. Codex/Claude use symlinks; Hermes reads the directory via `skills.external_dirs`.
 
 ## Obsidian Vault
 The vault lives at `~/Documents/online-personal/`. For any vault-related task, the `obsidian-vault` skill loads the full structure, conventions, and publishing flow on trigger — don't duplicate vault content here.

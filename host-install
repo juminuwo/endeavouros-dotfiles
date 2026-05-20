@@ -5,6 +5,7 @@
 #   - /etc/systemd/system/drive-sync.{service,timer}            (system, root)
 #   - ~/.config/systemd/user/credit-claim.{service,timer}       (user)
 #   - ~/.config/systemd/user/imoto-wiki-publish.{service,timer} (user)
+#   - ~/.config/systemd/user/hermes-restic-backup.{service,timer} (user)
 #
 # Idempotent: safe to re-run after editing the unit files in this repo.
 
@@ -61,10 +62,25 @@ systemctl --user daemon-reload
 systemctl --user enable --now imoto-wiki-publish.timer
 
 # ------------------------------------------------------------------
+# User units (hermes-restic-backup)
+# ------------------------------------------------------------------
+say "Installing user units (hermes-restic-backup)"
+
+install -m 644 "$USER_SRC/hermes-restic-backup.service" "$USER_DST/hermes-restic-backup.service"
+install -m 644 "$USER_SRC/hermes-restic-backup.timer"   "$USER_DST/hermes-restic-backup.timer"
+
+systemctl --user daemon-reload
+if [[ -r "$HOME/.config/restic/hermes-password" ]]; then
+  systemctl --user enable --now hermes-restic-backup.timer
+else
+  printf 'Skipping enable for hermes-restic-backup.timer; create ~/.config/restic/hermes-password and initialize the restic repo first.\n'
+fi
+
+# ------------------------------------------------------------------
 # Verify
 # ------------------------------------------------------------------
 say "Verifying timer status"
 systemctl list-timers --all --no-pager | grep -E 'drive-sync|credit-claim|imoto-wiki' || true
-systemctl --user list-timers --all --no-pager | grep -E 'credit-claim|imoto-wiki' || true
+systemctl --user list-timers --all --no-pager | grep -E 'credit-claim|imoto-wiki|hermes-restic' || true
 
 say "Done."

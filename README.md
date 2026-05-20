@@ -30,12 +30,12 @@ Driven by `install.conf.yaml`. Creates symlinks from `~` into `config/`, replaci
 | i3 / Kitty / picom / fcitx5 / nvim configs | `~/.config/{i3,kitty,picom,fcitx5,nvim}` |
 | zsh, X11, git | `~/.zshrc`, `~/.xprofile`, `~/.Xmodmap`, `~/.gitconfig`, `~/.config/git/ignore` |
 | SSH client config | `~/.ssh/config` |
-| Claude (settings, keybindings, skills) | `~/.claude/{settings.json,keybindings.json,skills/*}` |
-| User scripts in PATH | `~/bin/{clip-img,claude-notify}`, `~/.local/bin/{restore_i3_session,save_i3_session,soundwire-tray}` |
-| User systemd unit | `~/.config/systemd/user/mmo-mouse-workspaces.service` (started automatically by systemd once enabled) |
-| Top-level repo CLAUDE.md | `~/git/CLAUDE.md` |
+| Hermes/Codex/Claude agent config | `~/.codex/{config.toml,hooks.json,agents/*}`, `~/.agents/skills/*`, `~/.claude/{settings.json,keybindings.json,skills/*}`; Hermes reads `config/agent-skills/` via `skills.external_dirs` |
+| User scripts in PATH | `~/bin/{clip-img,claude-notify}`, `~/.local/bin/{agents-dashboard,agents-dashboard-spawn,restore_i3_session,save_i3_session,soundwire-tray,backup-hermes-restic}` |
+| User systemd units | `~/.config/systemd/user/mmo-mouse-workspaces.service`; host install also copies host-specific user units such as `hermes-restic-backup.{service,timer}` |
+| Top-level repo agent context | `~/git/AGENTS.md`, `~/git/CLAUDE.md` |
 
-After symlinking, dotbot runs `git submodule update --init --recursive` to keep `dotbot/` itself current.
+After symlinking, dotbot runs `git submodule update --init --recursive` to keep `dotbot/` itself current, then configures Hermes to read shared skills from `~/git/endeavouros-dotfiles/config/agent-skills` when `hermes` is installed.
 
 ### `./host-install`
 
@@ -45,8 +45,10 @@ Installs the systemd units that **can't** be symlinked because they need to live
 |---|---|---|
 | `drive-sync.{service,timer}` | `/etc/systemd/system/` | Weekly external drive rsync (Sundays 5am) |
 | `credit-claim.{service,timer}` | `~/.config/systemd/user/` | Daily oneshot at 22:13 |
+| `imoto-wiki-publish.{service,timer}` | `~/.config/systemd/user/` | Periodic Imoto wiki publish job |
+| `hermes-restic-backup.{service,timer}` | `~/.config/systemd/user/` | Encrypted restic backup of Hermes state and canonical agent skills |
 
-After install, both timers are reloaded and `enable --now`'d. Re-run `./host-install` whenever you edit the unit files in `config/host/systemd/`.
+After install, timers are reloaded and `enable --now`'d. The Hermes restic timer is only enabled when `~/.config/restic/hermes-password` exists. Re-run `./host-install` whenever you edit the unit files in `config/host/systemd/`.
 
 ## Repo layout
 
@@ -54,7 +56,7 @@ After install, both timers are reloaded and `enable --now`'d. Re-run `./host-ins
 endeavouros-dotfiles/
 ├── config/                          # everything dotbot symlinks
 │   ├── i3/, nvim/, fcitx5/ ...      # standard application configs
-│   ├── claude-skills/, claude-alerts/
+│   ├── agent-skills/, agent-agents/, codex-agents/, claude-alerts/
 │   ├── packages-{repo,aur}.txt      # package lists for install-packages
 │   ├── bin/                         # scripts → ~/.local/bin/
 │   └── host/                        # machine-specific (NOT symlinked)
@@ -75,6 +77,7 @@ endeavouros-dotfiles/
 - **`config/`** = portable configs that work on any EndeavourOS machine. Symlinked.
 - **`config/host/`** = machine-specific (drive UUIDs, services tied to local hardware). Copied/referenced by absolute path; not symlinked.
 - Adding a new dotfile: drop it under `config/`, add a `link:` entry in `install.conf.yaml`, run `./install`.
+- Adding a shared personal skill: add `config/agent-skills/<name>/SKILL.md`, add Codex/Claude symlinks in `install.conf.yaml`, run `./install`, then reload/restart the target agent. Hermes uses the whole parent directory via `skills.external_dirs`.
 - Adding a new systemd unit: drop it under `config/host/systemd/{system,user}/`, extend `host-install`, re-run it.
 
 ## Manual host steps (not automated)

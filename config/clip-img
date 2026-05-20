@@ -1,5 +1,5 @@
 #!/bin/bash
-# Save clipboard image to file for pasting into Claude Code
+# Save clipboard image to file for pasting into terminal AI agents.
 
 TARGETS=$(xclip -selection clipboard -t TARGETS -o 2>/dev/null)
 

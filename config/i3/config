@@ -300,7 +300,7 @@ bindsym XF86AudioPrev exec --no-startup-id playerctl previous
 # bindsym Print exec --no-startup-id scrot ~/%Y-%m-%d-%T-screenshot.png && notify-send "Screenshot saved to ~/$(date +"%Y-%m-%d-%T")-screenshot.png"
 bindsym Print exec flameshot gui
 
-# Save clipboard image to file for pasting into Claude Code
+# Save clipboard image to file for pasting into terminal AI agents
 bindsym $mod+Shift+v exec --no-startup-id ~/bin/clip-img
 
 # Project switcher (groups kitty windows on ws6/ws7 into named projects)

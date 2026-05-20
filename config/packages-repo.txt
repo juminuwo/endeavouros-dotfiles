@@ -69,6 +69,7 @@ glances
 lazygit
 rsync
 rclone
+restic
 systemctl-tui
 tldr
 tree

@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Back up Hermes state and canonical agent skills to an encrypted restic repo.
+#
+# First-time setup on a new machine:
+#   mkdir -p ~/.config/restic
+#   openssl rand -base64 32 > ~/.config/restic/hermes-password
+#   chmod 600 ~/.config/restic/hermes-password
+#   restic -r rclone:Gdrive_howismypielola:HermesRestic init --password-file ~/.config/restic/hermes-password
+#
+# Store ~/.config/restic/hermes-password in a password manager. Without it,
+# the cloud backup is unrecoverable.
+
+set -euo pipefail
+
+REPO="${RESTIC_REPOSITORY:-rclone:Gdrive_howismypielola:HermesRestic}"
+PASSFILE="${RESTIC_PASSWORD_FILE:-$HOME/.config/restic/hermes-password}"
+
+if [[ ! -r "$PASSFILE" ]]; then
+  cat >&2 <<EOF
+Missing restic password file: $PASSFILE
+
+Create it with:
+  mkdir -p ~/.config/restic
+  openssl rand -base64 32 > ~/.config/restic/hermes-password
+  chmod 600 ~/.config/restic/hermes-password
+
+Then initialize the repo with:
+  restic -r "$REPO" init --password-file "$PASSFILE"
+
+Save the password in your password manager before relying on backups.
+EOF
+  exit 1
+fi
+
+restic -r "$REPO" backup \
+  "$HOME/.hermes" \
+  "$HOME/git/endeavouros-dotfiles/config/agent-skills" \
+  --password-file "$PASSFILE" \
+  --exclude "$HOME/.hermes/hermes-agent" \
+  --exclude "$HOME/.hermes/logs" \
+  --exclude "$HOME/.hermes/audio_cache" \
+  --exclude "$HOME/.hermes/checkpoints" \
+  --exclude "$HOME/.hermes/state-snapshots"
+
+restic -r "$REPO" forget \
+  --keep-daily 7 \
+  --keep-weekly 4 \
+  --keep-monthly 6 \
+  --prune \
+  --password-file "$PASSFILE"

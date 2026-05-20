@@ -17,7 +17,7 @@
     ~/.claude/keybindings.json: config/claude-keybindings.json
     ~/.codex/config.toml: config/codex-config.toml
     ~/.codex/hooks.json: config/codex-hooks.json
-    # Skills: Claude Code and Codex get per-skill symlinks; Hermes reads the
+    # Skills: Codex and legacy Claude Code get per-skill symlinks; Hermes reads the
     # same canonical source dir via skills.external_dirs configured below.
     ~/.claude/skills/research-first: config/agent-skills/research-first
     ~/.claude/skills/tech-wiki: config/agent-skills/tech-wiki
@@ -31,10 +31,10 @@
     ~/.agents/skills/obsidian-vault: config/agent-skills/obsidian-vault
     ~/.agents/skills/kanban-sync: config/agent-skills/kanban-sync
     ~/.agents/skills/kitty-codex-agents: config/agent-skills/kitty-codex-agents
-    # Agents — Claude reads markdown (.claude/agents/*.md), Codex reads TOML
+    # Agents — legacy Claude reads markdown (.claude/agents/*.md), Codex reads TOML
     # (.codex/agents/*.toml). Formats differ, so we maintain both. The Codex
-    # version is generated from the Claude one via /tmp/agent-port.py and
-    # must be regenerated when the Claude original changes.
+    # version is generated from the markdown source and must be regenerated
+    # when that source changes.
     ~/.claude/agents/kanban-planner.md: config/agent-agents/kanban-planner.md
     ~/.codex/agents/kanban-planner.toml: config/codex-agents/kanban-planner.toml
     ~/.config/kitty/current-theme.conf: config/kitty-current-theme.conf
@@ -56,6 +56,7 @@
     ~/.local/bin/soundwire-tray: config/bin/soundwire-tray
     ~/.local/bin/agents-dashboard: config/bin/agents-dashboard
     ~/.local/bin/agents-dashboard-spawn: config/bin/agents-dashboard-spawn
+    ~/.local/bin/backup-hermes-restic: config/bin/backup-hermes-restic
     ~/.local/bin/project-switch: config/bin/project-switch
     ~/.local/bin/project-status: config/bin/project-status
     ~/.local/bin/i3blocks-workspaces: config/bin/i3blocks-workspaces

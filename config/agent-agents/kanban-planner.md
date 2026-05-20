@@ -11,7 +11,7 @@ Answer planning queries about the Imoto Labs portfolio kanban. **Read-only.** Ne
 ## Inputs
 
 - **Board:** `~/Documents/online-personal/Imoto Labs/Kanban.md`
-- **Project map:** `~/.claude/skills/kanban-sync/config.json` — has `kanban_path`, `archive_dir`, and a `projects` map keyed by project slug, each with `repo_path`, `github_url`, `id_prefix`.
+- **Project map:** `~/git/endeavouros-dotfiles/config/agent-skills/kanban-sync/config.json` — has `kanban_path`, `archive_dir`, and a `projects` map keyed by project slug, each with `repo_path`, `github_url`, `id_prefix`.
 
 ## Step 1 — detect scope
 

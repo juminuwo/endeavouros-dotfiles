@@ -1,7 +1,7 @@
 model = "gpt-5.5"
 model_reasoning_effort = "medium"
 approvals_reviewer = "user"
-sandbox_mode = "workspace-write"
+sandbox_mode = "danger-full-access"
 approval_policy = "never"
 [projects."/home/howis/git"]
 trust_level = "trusted"
@@ -15,8 +15,13 @@ trust_level = "trusted"
 [projects."/home/howis/git/driver-shield"]
 trust_level = "trusted"
 
+[projects."/home/howis/git/endeavouros-dotfiles"]
+trust_level = "trusted"
+
 [tui]
 session_picker_view = "comfortable"
+status_line = ["model-with-reasoning", "current-dir", "project-name", "git-branch", "permissions", "approval-mode"]
+status_line_use_colors = true
 
 [tui.model_availability_nux]
 "gpt-5.5" = 4

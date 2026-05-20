@@ -31,7 +31,7 @@ Hermes can spawn the tabs, send messages into them, fetch their screen output, a
 
 ## When to Use
 
-Use this skill when the user asks to:
+Use this skill when the user invokes `kitty-codex-agents` or asks to:
 
 - spawn a Codex agent
 - open a Codex agent in kitty
@@ -40,11 +40,25 @@ Use this skill when the user asks to:
 - coordinate multiple Codex agents
 - run live-visible coding agents without taking over the current Hermes session
 
+User preference: invoking this skill means the user specifically wants a new Codex tab in the current kitty window for coding work. Do not treat the skill invocation as optional background context. Unless the user explicitly asks only to inspect/monitor an existing tab, immediately spawn a new interactive Codex tab before doing the coding work yourself.
+
+Default action on skill invocation:
+
+1. Verify prerequisites with `command -v kitty`, `kitty --version`, `command -v codex`, `codex --version`, and `kitty @ ls`.
+2. Choose the working directory:
+   - If the user names a repo/worktree, use that path.
+   - Otherwise use the current repo when the current working directory is inside a git repository.
+   - If no git repo is available, create or choose an appropriate git worktree/repo before launching Codex.
+3. Launch an interactive Codex tab with a stable `--var hermes_agent=<agent-name>` and `--hold /usr/bin/codex`.
+4. Fetch the new tab screen with `kitty @ get-text` to check for startup/trust prompts.
+5. Send the user's coding task into the tab with `kitty @ send-text` plus `kitty @ send-key ... enter`.
+6. Continue as coordinator: poll Codex, inspect diffs directly, run tests directly, and report verified results.
+
 Do not use this for:
 
-- quick hidden subtasks where `delegate_task` is enough
+- quick hidden subtasks where `delegate_task` is enough, unless the user invoked this skill anyway; explicit invocation wins and should open a tab
 - scheduled/durable background jobs; use cron instead
-- non-interactive one-shot shell tasks that do not benefit from live visibility
+- non-interactive one-shot shell tasks that do not benefit from live visibility, unless the user invoked this skill anyway; explicit invocation wins and should open a tab
 
 ## Prerequisites
 
@@ -112,6 +126,8 @@ Notes:
 - `--hold` keeps the tab open after Codex exits so the final output is visible.
 - Codex may first ask whether the repository is trusted.
 - If the trust prompt appears, the user can answer in the tab, or Hermes can send the appropriate choice if instructed.
+- See `references/interactive-spawn-and-prompt.md` for a verified prompt-handoff recipe and pitfalls from a real test-run session.
+- See `references/invocation-means-launch.md` for the user-corrected rule that invoking this skill means opening a new Codex tab immediately, not merely considering the workflow.
 
 ## Spawn a One-Shot Codex Task Tab
 
@@ -218,7 +234,9 @@ Only close tabs when the user asks or the task lifecycle clearly requires cleanu
 
 ## Common Pitfalls
 
-1. **Trust prompt blocks the first message.** Codex may ask whether the repository is trusted. Fetch the screen after spawning and handle the prompt before sending task instructions.
+1. **Treating skill invocation as optional context.** For this user, invoking `kitty-codex-agents` alongside a coding request means: open a new Codex tab in the current kitty window first, then coordinate. Do not start implementing or debugging directly unless the user explicitly says not to spawn Codex.
+
+2. **Trust prompt blocks the first message.** Codex may ask whether the repository is trusted. Fetch the screen after spawning and handle the prompt before sending task instructions.
 
 2. **Matching by title is brittle.** Codex or shell integration may rename the tab/window. Always launch with `--var hermes_agent=<agent-name>` and match on that variable.
 

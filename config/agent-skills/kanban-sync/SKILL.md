@@ -35,6 +35,7 @@ For `Kanban: new`, the project tag (`#driver-shield`, `#business-scout`, etc.) d
 | User says… | Mode |
 |---|---|
 | "sync the kanban", "update the board", `/kanban-sync` | **Mode 1** — sync only |
+| "check latest merges against the board", "forgot to review merges", "audit recent merges vs kanban" | **Mode 1b** — merge/board audit, then patch board if asked |
 | "commit and update kanban", "commit with kanban trailer", `/kanban-sync commit` | **Mode 2** — commit + sync |
 | "what's next?", `/kanban`, "kanban status", "tell me about DSH-009" | **Delegate to `kanban-planner` agent** — read-only, returns a dashboard |
 | "commit this" (no kanban mention) | NOT this skill — standard commit flow |
@@ -59,6 +60,17 @@ Useful flags:
 - `--assign-ids` — one-shot: walk existing cards and assign IDs to any without one
 
 Report back: cards moved, commits linked, cards archived, WIP warning if any.
+
+## Mode 1b — merge/board audit
+
+Use this when the user asks whether recent merges were missed, forgot to review merged PRs against the board, or asks for a `/kanban-sync` board audit rather than a mechanical sync.
+
+1. Fetch first, then compare the remote default branch, not just the local branch. A local branch may be behind, and `sync.py --dry-run` can report "no new commits" only because it scans the local checkout. Discover the default branch with `git symbolic-ref refs/remotes/origin/HEAD` or inspect `origin/master`/`origin/main`.
+2. Inspect recent merged PRs with GitHub (`gh pr list --state merged --limit N --json number,title,mergedAt,headRefName,mergeCommit,commits,files,url`) and compare against the board's card text + commit links.
+3. Treat commits with `Kanban:` trailers as strong evidence, but also flag merged PRs without trailers whose title/body mentions a card ID or whose files clearly belong to an active/recent card.
+4. Report the exact card actions: move column, add date, add commit links, or leave untracked. If the user says to apply the recommendations, patch the board directly rather than running sync unless the missing trailers are present and local history is up to date.
+5. When adding commit links manually, verify the full SHA before writing the URL. Do not invent full hashes from abbreviated hashes or tool output snippets.
+6. After patching, verify each touched card appears in the intended column exactly once and that expected short hashes + full commit URLs are present. Watch for duplicate `Commits:` lines when replacing an existing single-link line.
 
 ## Mode 2 — commit + sync
 

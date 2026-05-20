@@ -1,6 +1,6 @@
 # endeavouros-dotfiles — system source of truth
 
-This repo is the source of truth for system config (i3, Kitty, zsh, Claude Code, `~/bin` scripts, packages, systemd units). `~/.config/i3/config`, `~/.claude/settings.json`, `~/bin/*`, `~/git/CLAUDE.md` etc. are **symlinks managed by dotbot** — edit the file under `config/` in the repo, never the symlink target.
+This repo is the source of truth for system config (i3, Kitty, zsh, Hermes, Codex CLI, legacy Claude Code, `~/bin` scripts, packages, systemd units). `~/.config/i3/config`, `~/.codex/config.toml`, `~/.claude/settings.json`, `~/bin/*`, `~/git/AGENTS.md`, `~/git/CLAUDE.md` etc. are **symlinks managed by dotbot** — edit the file under `config/` in the repo, never the symlink target.
 
 ## Three install entry points (idempotent, re-runnable)
 
@@ -17,7 +17,7 @@ This repo is the source of truth for system config (i3, Kitty, zsh, Claude Code,
 | A portable dependency | `config/packages-repo.txt` (pacman) or `config/packages-aur.txt` (AUR). Decide with `pacman -Si <pkg>`: `Repository: extra/core/multilib` → repo file; `Repository: aur` (or not found) → AUR file. | run `./install-packages` |
 | A hardware-specific package (NVIDIA, Intel ucode, etc.) | `config/host/packages-host-repo.txt` | run `./host-install` |
 | A systemd unit | `config/host/systemd/{system,user}/` | extend `host-install`, re-run it |
-| A shared agent skill | `config/agent-skills/<name>/SKILL.md` | Claude/Codex are linked via `install.conf.yaml`; Hermes reads the whole directory through `skills.external_dirs`. Run `./install`, then restart agents or reload skills. |
+| A shared agent skill | `config/agent-skills/<name>/SKILL.md` | Codex/Claude are linked via `install.conf.yaml`; Hermes reads the whole directory through `skills.external_dirs`. Run `./install`, then restart agents or reload skills. |
 
 ## Conventions
 
@@ -32,12 +32,12 @@ This repo is the source of truth for system config (i3, Kitty, zsh, Claude Code,
 
 ## Shared agent skills
 
-- `config/agent-skills/` is the canonical source for personal workflow/domain skills shared by Claude Code, Codex, and Hermes.
-- Claude Code uses `~/.claude/skills/<name>` symlinks; Codex uses `~/.agents/skills/<name>` symlinks; Hermes reads `config/agent-skills/` via `skills.external_dirs`.
+- `config/agent-skills/` is the canonical source for personal workflow/domain skills shared by Hermes, Codex, and legacy Claude Code.
+- Codex uses `~/.agents/skills/<name>` symlinks; legacy Claude Code uses `~/.claude/skills/<name>` symlinks; Hermes reads `config/agent-skills/` via `skills.external_dirs`.
 - Keep skill instructions agent-neutral where possible. Prefer canonical repo paths over `~/.claude/skills/...` paths when referencing bundled scripts or references.
-- When adding a new skill, add the source directory under `config/agent-skills/`, add Claude/Codex symlinks in `install.conf.yaml`, run `./install`, then verify with the target agent's skill list/reload command.
+- When adding a new skill, add the source directory under `config/agent-skills/`, add Codex/Claude symlinks in `install.conf.yaml`, run `./install`, then verify with the target agent's skill list/reload command.
 
-## Two CLAUDE.md files in this repo
+## AGENTS.md and CLAUDE.md compatibility
 
-- **`config/CLAUDE.md`** — symlinked to `~/git/CLAUDE.md`, inherited by every `~/git/<project>` cwd. Keep it lean; cross-project content only.
-- **`CLAUDE.md`** (this file) — only loaded when cwd is inside this repo. Dotfiles-specific guidance goes here.
+- **`config/AGENTS.md`** — symlinked to both `~/git/AGENTS.md` and `~/git/CLAUDE.md` so Hermes/Codex and Claude-compatible agents inherit the same cross-project context. Keep it lean; cross-project content only.
+- **`AGENTS.md`** (this file) — only loaded when cwd is inside this repo. Dotfiles-specific guidance goes here.

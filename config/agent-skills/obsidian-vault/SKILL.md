@@ -52,12 +52,11 @@ Imoto Labs/
 - **Meeting note:** `Meetings/YYYY-MM-DD.md` AND add a row to the `Meetings/Meetings.md` table under the right year.
 - **Release note:** `Releases/YYYY-MM-DD <Name>.md` AND add a row to `Releases/Releases.md`.
 - **New project:** `Projects/<Name>/<Name>.md` AND add a row to `Projects/Projects.md`.
-- **Messaging doc:** `Messaging/<Product>.md` — follow the structure documented in `Messaging/Messaging.md` (ICP → Problem → Competitive → Positioning → Pillars → Objections → Forbidden claims). All messaging docs are `draft: true` (internal only).
+- **Publish status:** `draft: true` blocks publishing. Do not add it by default to messaging docs; use it only when the user explicitly wants a file hidden.
 - **Frontmatter:** every file needs YAML frontmatter — `type:` (meeting | decision | spec | strategy | reference | release | index | project | messaging-doc | messaging-doc-guide | credentials), `status:` (active | archived | needs_rewrite | draft), and `date:` for time-bound docs.
 - **Linking:** Obsidian `[[wikilinks]]` for internal navigation, `[text](url)` for external.
-- **Hidden from publishing:** `Credentials/`, `Founding/`, `Meetings/`, `Messaging/` are private. Two mechanisms:
-  - `ignorePatterns` in `~/git/imoto-labs-wiki/quartz.config.ts` (folder-level — currently includes `credentials`)
-  - `draft: true` in frontmatter (per-file — currently used for `Founding/`, `Meetings/`, `Messaging/`)
+- **Publishing visibility:** `draft: true` prevents a file from publishing. Do not add it unless the user explicitly wants the note hidden.
+- **Hidden from publishing:** private folders are excluded via publishing config or per-file `draft: true` where already present. Do not assume `Messaging/` should be draft-hidden; Driver Shield messaging is intended to publish.
 
 ## Publishing the wiki
 
@@ -94,6 +93,16 @@ To change Quartz behaviour (e.g. add a folder to `ignorePatterns`), edit `~/git/
 
 These are private — never publish or expose externally. Lighter conventions than Imoto Labs; follow whatever pattern already exists in the target subdirectory.
 
+### Personal note collections from chat drafts
+
+When the user asks to save a set of personal drafts/ideas into `Personal/`:
+1. Preserve the user-requested folder/title spelling unless they ask for correction, even if it contains a typo.
+2. Create `Personal/<Collection>/<Collection>.md` as the folder index with `type: index`, `status: active`, and `updated: YYYY-MM-DD`.
+3. Create each draft as its own markdown file with frontmatter such as `type: reference`, `status: draft`, and `date: YYYY-MM-DD`.
+4. Add each draft to the collection index using Obsidian wikilinks.
+5. Add the collection to `Personal/Personal.md` under `## Sections` if it is a new Personal subsection.
+6. For rough multilingual text, lightly normalize spelling/grammar for readability while preserving the user's tone, intent, line-item structure, prices, URLs, and any intentionally casual phrasing.
+
 ## Common tasks — short playbooks
 
 ### Log a meeting
@@ -114,8 +123,9 @@ These are private — never publish or expose externally. Lighter conventions th
 ### Add or update a messaging doc
 1. Read `Messaging/Messaging.md` for structure and conventions.
 2. Read an existing doc (e.g. `Messaging/Driver Shield.md`) for the template.
-3. Create `Messaging/<Product>.md` with `type: messaging-doc`, `draft: true`.
+3. Create `Messaging/<Product>.md` with `type: messaging-doc`. Set `draft: true` only if the user explicitly wants the file hidden from publishing.
 4. Add a link under "Existing docs" in `Messaging/Messaging.md`.
+5. For Driver Shield procurement / pilot-rig cost-basis edits, also consult `references/driver-shield-procurement-messaging.md` for the current framing: fleet-budget new-build is the default path; 4K builds are other/reference paths.
 
 ### Update navigation after structural changes
 - Touched any folder index (`<Folder>/<Folder>.md`)? Make sure it lists all current children.

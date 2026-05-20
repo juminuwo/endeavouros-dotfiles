@@ -124,8 +124,13 @@
   },
   "alwaysThinkingEnabled": true,
   "effortLevel": "high",
+  "voice": {
+    "enabled": false,
+    "mode": "hold"
+  },
   "skipDangerousModePermissionPrompt": true,
   "theme": "dark-daltonized",
   "agentPushNotifEnabled": true,
-  "skipAutoPermissionPrompt": true
+  "skipAutoPermissionPrompt": true,
+  "voiceEnabled": false
 }
