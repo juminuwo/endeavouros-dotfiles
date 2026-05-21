@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Hermes shell hook: desktop notification when a CLI turn ends."""
+"""Hermes shell hook: desktop notifications for CLI lifecycle events."""
 
 from __future__ import annotations
 
@@ -9,6 +9,52 @@ import subprocess
 import sys
 
 
+def session_end_message(payload: dict, extra: dict) -> str | None:
+    platform = extra.get("platform") or payload.get("platform") or ""
+
+    # Avoid duplicate desktop notifications for gateway/mobile sessions; the
+    # original request is for Hermes CLI parity with Claude/Codex desktop hooks.
+    if platform and platform != "cli":
+        return None
+
+    completed = extra.get("completed")
+    interrupted = extra.get("interrupted")
+
+    if interrupted:
+        return "Hermes interrupted"
+    if completed is False:
+        return "Hermes stopped without a final response"
+    return "Hermes finished"
+
+
+def approval_message(payload: dict, extra: dict) -> str | None:
+    surface = extra.get("surface") or payload.get("surface") or ""
+    if surface and surface != "cli":
+        return None
+
+    description = extra.get("description") or "Command needs approval"
+    command = (extra.get("command") or "").strip().replace("\n", " ")
+    if command:
+        command = command[:80] + ("..." if len(command) > 80 else "")
+        return f"Hermes needs permission: {description} - {command}"
+    return f"Hermes needs permission: {description}"
+
+
+def notify(message: str) -> None:
+    env = os.environ.copy()
+    env["title"] = "Hermes"
+    env["message"] = message
+
+    notify_bin = os.path.expanduser("~/bin/claude-notify")
+    subprocess.Popen(
+        [notify_bin],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
 def main() -> int:
     try:
         payload = json.load(sys.stdin)
@@ -16,36 +62,17 @@ def main() -> int:
         payload = {}
 
     extra = payload.get("extra") or {}
-    platform = extra.get("platform") or payload.get("platform") or ""
+    event = payload.get("hook_event_name") or "on_session_end"
 
-    # Avoid duplicate desktop notifications for gateway/mobile sessions; the
-    # original request is for Hermes CLI parity with Claude/Codex desktop hooks.
-    if platform and platform != "cli":
-        print("{}")
-        return 0
-
-    completed = extra.get("completed")
-    interrupted = extra.get("interrupted")
-
-    if interrupted:
-        message = "Hermes interrupted"
-    elif completed is False:
-        message = "Hermes stopped without a final response"
+    if event == "on_session_end":
+        message = session_end_message(payload, extra)
+    elif event == "pre_approval_request":
+        message = approval_message(payload, extra)
     else:
-        message = "Hermes finished"
+        message = None
 
-    env = os.environ.copy()
-    env["title"] = "Hermes"
-    env["message"] = message
-
-    notify = os.path.expanduser("~/bin/claude-notify")
-    subprocess.Popen(
-        [notify],
-        env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
+    if message:
+        notify(message)
 
     print("{}")
     return 0
