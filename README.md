@@ -44,7 +44,7 @@ Installs the systemd units that **can't** be symlinked because they need to live
 | Unit | Installed to | Purpose |
 |---|---|---|
 | `drive-sync.{service,timer}` | `/etc/systemd/system/` | Weekly external drive rsync (Sundays 5am) |
-| `credit-claim.{service,timer}` | `~/.config/systemd/user/` | Daily oneshot at 22:13 |
+| `credit-claim.{service,timer}` | `~/.config/systemd/user/` | Daily oneshot, starting at 10:10 and moving 30s later after each success |
 | `imoto-wiki-publish.{service,timer}` | `~/.config/systemd/user/` | Periodic Imoto wiki publish job |
 | `hermes-restic-backup.{service,timer}` | `~/.config/systemd/user/` | Encrypted restic backup of Hermes state and canonical agent skills |
 
