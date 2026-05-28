@@ -81,6 +81,7 @@ yazi
 yt-dlp
 zoxide
 glow
+imagemagick
 wget
 pkgfile
 7zip
@@ -190,6 +191,7 @@ gvfs-mtp
 gvfs-nfs
 gvfs-smb
 libdvdcss
+poppler
 poppler-glib
 
 # OCR

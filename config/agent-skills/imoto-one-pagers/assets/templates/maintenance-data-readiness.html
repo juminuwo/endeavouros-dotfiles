@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Imoto Labs - Predictive Maintenance One-Pager</title>
+  <link rel="stylesheet" href="one-pager.css">
+</head>
+<body>
+  <main class="sheet maintenance-sheet">
+    <header class="brand">
+      <div class="brand-mark">Imoto Labs</div>
+      <div class="category">Fleet health data review</div>
+    </header>
+
+    <section class="intro split">
+      <div>
+        <p class="eyebrow">Predictive Maintenance</p>
+        <h1>{{ headline }}</h1>
+        <p class="subhead">{{ subhead }}</p>
+      </div>
+      <ul class="problem">
+        <li>{{ problem_1 }}</li>
+        <li>{{ problem_2 }}</li>
+        <li>{{ problem_3 }}</li>
+      </ul>
+    </section>
+
+    <figure class="visual maintenance-visual">
+      <img src="{{ visual_image }}" alt="{{ visual_alt }}">
+      <figcaption class="visual-label">{{ visual_caption }}</figcaption>
+    </figure>
+
+    <section class="split-grid">
+      <div>
+        <div class="cards">
+          <article class="card"><h2>{{ value_1_title }}</h2><p>{{ value_1_body }}</p></article>
+          <article class="card"><h2>{{ value_2_title }}</h2><p>{{ value_2_body }}</p></article>
+          <article class="card"><h2>{{ value_3_title }}</h2><p>{{ value_3_body }}</p></article>
+        </div>
+        <p class="fit"><strong>Best fit:</strong> {{ best_fit }}</p>
+      </div>
+
+      <aside class="side-panel">
+        <section class="process"><h2>First engagement</h2><ol>{{ first_engagement_items }}</ol></section>
+        <section class="boundary"><h2>Proof boundary</h2><p>{{ proof_boundary }}</p></section>
+        <section class="cta"><h2>Next step</h2><p>{{ cta }}</p></section>
+      </aside>
+    </section>
+  </main>
+</body>
+</html>

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Imoto Labs - Route Optimization One-Pager</title>
+  <link rel="stylesheet" href="one-pager.css">
+</head>
+<body>
+  <main class="sheet route-sheet">
+    <header class="brand">
+      <div class="brand-mark">Imoto Labs</div>
+      <div class="category">Routing audit demo</div>
+    </header>
+
+    <section class="intro">
+      <div>
+        <p class="eyebrow">Route Optimization</p>
+        <h1>{{ headline }}</h1>
+        <p class="subhead">{{ subhead }}</p>
+      </div>
+      <ul class="problem row">
+        <li>{{ problem_1 }}</li>
+        <li>{{ problem_2 }}</li>
+        <li>{{ problem_3 }}</li>
+      </ul>
+    </section>
+
+    <section class="route-visuals">
+      <figure class="visual route-map">
+        <img src="{{ route_map_image }}" alt="{{ route_map_alt }}">
+        <figcaption class="visual-label">{{ route_map_caption }}</figcaption>
+      </figure>
+      <figure class="visual route-audit">
+        <img src="{{ audit_image }}" alt="{{ audit_alt }}">
+        <figcaption class="visual-label">{{ audit_caption }}</figcaption>
+      </figure>
+    </section>
+
+    <section class="cards three">
+      <article class="card"><h2>{{ value_1_title }}</h2><p>{{ value_1_body }}</p></article>
+      <article class="card"><h2>{{ value_2_title }}</h2><p>{{ value_2_body }}</p></article>
+      <article class="card"><h2>{{ value_3_title }}</h2><p>{{ value_3_body }}</p></article>
+    </section>
+    <p class="fit"><strong>Best fit:</strong> {{ best_fit }}</p>
+
+    <section class="footer-grid">
+      <section class="process"><h2>First engagement</h2><ol>{{ first_engagement_items }}</ol></section>
+      <section class="boundary"><h2>Proof boundary</h2><p>{{ proof_boundary }}</p></section>
+      <section class="cta"><h2>Next step</h2><p>{{ cta }}</p></section>
+    </section>
+  </main>
+</body>
+</html>

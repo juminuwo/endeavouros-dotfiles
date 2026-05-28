@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Imoto Labs - Driver Shield One-Pager</title>
+  <link rel="stylesheet" href="one-pager.css">
+</head>
+<body>
+  <main class="sheet dark driver-sheet">
+    <header class="brand">
+      <div class="brand-mark">Imoto Labs</div>
+      <div class="category">Fleet evidence pilot</div>
+    </header>
+
+    <section class="driver-top">
+      <div>
+        <p class="eyebrow">Driver Shield</p>
+        <h1>{{ headline }}</h1>
+        <p class="subhead">{{ subhead }}</p>
+        <ul class="problem">
+          <li>{{ problem_1 }}</li>
+          <li>{{ problem_2 }}</li>
+          <li>{{ problem_3 }}</li>
+        </ul>
+      </div>
+      <figure class="visual driver-visual">
+        <img src="{{ visual_image }}" alt="{{ visual_alt }}">
+        <figcaption class="visual-label">{{ visual_caption }}</figcaption>
+      </figure>
+    </section>
+
+    <section class="cards three">
+      <article class="card"><h2>{{ value_1_title }}</h2><p>{{ value_1_body }}</p></article>
+      <article class="card"><h2>{{ value_2_title }}</h2><p>{{ value_2_body }}</p></article>
+      <article class="card"><h2>{{ value_3_title }}</h2><p>{{ value_3_body }}</p></article>
+    </section>
+    <p class="fit"><strong>Best fit:</strong> {{ best_fit }}</p>
+
+    <section class="footer-grid">
+      <section class="process"><h2>First engagement</h2><ol>{{ first_engagement_items }}</ol></section>
+      <section class="boundary"><h2>Proof boundary</h2><p>{{ proof_boundary }}</p></section>
+      <section class="cta"><h2>Next step</h2><p>{{ cta }}</p></section>
+    </section>
+  </main>
+</body>
+</html>

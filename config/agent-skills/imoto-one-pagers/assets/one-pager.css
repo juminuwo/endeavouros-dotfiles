@@ -1,0 +1,521 @@
+:root {
+  --ink: #10211b;
+  --muted: #54645f;
+  --paper: #f7faf7;
+  --panel: #ffffff;
+  --line: #d8e4dd;
+  --green: #00c853;
+  --green-dark: #08783a;
+  --charcoal: #0b1110;
+  --slate: #16211f;
+  --amber: #d39b2a;
+  --red: #ef4444;
+  --blue: #2563eb;
+}
+
+@page {
+  size: A4 portrait;
+  margin: 0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+  color: var(--ink);
+  background: #e8eee9;
+}
+
+body {
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.sheet {
+  width: 8.27in;
+  height: 11.69in;
+  margin: 0 auto;
+  padding: 0.42in 0.46in;
+  background:
+    linear-gradient(135deg, rgba(0, 200, 83, 0.08), transparent 34%),
+    linear-gradient(180deg, #fbfdfb 0%, #f2f7f4 100%);
+  overflow: hidden;
+  position: relative;
+}
+
+.sheet.dark {
+  color: #e9f5ef;
+  background:
+    linear-gradient(145deg, rgba(0, 200, 83, 0.18), transparent 34%),
+    linear-gradient(180deg, #07100e 0%, #111816 58%, #0b1110 100%);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.18in;
+  margin-bottom: 0.18in;
+  font-size: 0.125in;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  font-weight: 850;
+  color: var(--green-dark);
+}
+
+.dark .brand {
+  color: var(--green);
+}
+
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.08in;
+  white-space: nowrap;
+}
+
+.brand-mark::before {
+  content: "";
+  width: 0.18in;
+  height: 0.18in;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 0 0.06in rgba(0, 200, 83, 0.13);
+}
+
+.category {
+  color: var(--muted);
+  font-weight: 750;
+  text-align: right;
+}
+
+.dark .category {
+  color: #9eb2aa;
+}
+
+.intro {
+  display: grid;
+  gap: 0.14in;
+}
+
+.intro.split {
+  grid-template-columns: minmax(0, 1fr) minmax(2.08in, 0.55fr);
+  align-items: end;
+  gap: 0.24in;
+}
+
+.eyebrow {
+  margin: 0 0 0.07in;
+  color: var(--green-dark);
+  font-size: 0.125in;
+  font-weight: 850;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.dark .eyebrow {
+  color: var(--green);
+}
+
+h1 {
+  margin: 0;
+  font-size: 0.46in;
+  line-height: 0.98;
+  letter-spacing: 0;
+}
+
+.route-sheet h1 {
+  font-size: 0.48in;
+  max-width: 6.8in;
+}
+
+.route-sheet .intro {
+  grid-template-columns: minmax(0, 1fr) minmax(2.55in, 0.74fr);
+  align-items: end;
+  gap: 0.22in;
+}
+
+.route-sheet .problem.row {
+  grid-template-columns: 1fr;
+  gap: 0.075in;
+  margin: 0;
+  font-size: 0.112in;
+}
+
+.route-sheet .problem.row li {
+  padding: 0.095in 0.12in 0.095in 0.3in;
+}
+
+.maintenance-sheet h1 {
+  font-size: 0.4in;
+}
+
+.driver-sheet h1 {
+  color: #f2fff8;
+  font-size: 0.42in;
+}
+
+.subhead {
+  margin: 0.14in 0 0;
+  max-width: 6.6in;
+  font-size: 0.155in;
+  line-height: 1.42;
+  color: #31423c;
+}
+
+.dark .subhead {
+  color: #c5d6d0;
+}
+
+.problem {
+  margin: 0.2in 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.1in;
+  color: #203630;
+  font-size: 0.124in;
+  line-height: 1.36;
+}
+
+.problem.row {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.problem li {
+  position: relative;
+  padding: 0.12in 0.13in 0.12in 0.32in;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(216, 228, 221, 0.9);
+  border-radius: 0.08in;
+}
+
+.problem li::before {
+  content: "";
+  position: absolute;
+  left: 0.13in;
+  top: 0.18in;
+  width: 0.085in;
+  height: 0.085in;
+  border-radius: 50%;
+  background: var(--green);
+}
+
+.dark .problem {
+  color: #d8e9e2;
+}
+
+.dark .problem li {
+  background: rgba(255, 255, 255, 0.065);
+  border-color: rgba(255, 255, 255, 0.13);
+}
+
+.visual {
+  border: 1px solid var(--line);
+  border-radius: 0.08in;
+  background: #0e1715;
+  overflow: hidden;
+  position: relative;
+  box-shadow: 0 0.16in 0.36in rgba(24, 47, 37, 0.13);
+}
+
+.visual img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.visual-label {
+  position: absolute;
+  left: 0.14in;
+  bottom: 0.12in;
+  padding: 0.075in 0.105in;
+  background: rgba(8, 18, 15, 0.84);
+  color: #eafff4;
+  border: 1px solid rgba(0, 200, 83, 0.32);
+  border-radius: 0.06in;
+  font-size: 0.105in;
+  font-weight: 800;
+}
+
+.route-visuals {
+  display: grid;
+  gap: 0.09in;
+  margin-top: 0.16in;
+}
+
+.route-map {
+  height: 2.12in;
+  background: #d9eee9;
+}
+
+.route-map img {
+  object-position: center center;
+}
+
+.route-graph {
+  height: 1.05in;
+  background: #ffffff;
+}
+
+.route-graph img {
+  object-fit: contain;
+  padding: 0.02in 0.08in;
+  background: #ffffff;
+}
+
+.route-audit {
+  height: 1.58in;
+  background: #0b0f17;
+}
+
+.route-audit img {
+  object-fit: cover;
+  object-position: center center;
+}
+
+.maintenance-sheet {
+  background:
+    linear-gradient(180deg, rgba(0, 200, 83, 0.07), transparent 39%),
+    #f6faf8;
+}
+
+.maintenance-visual {
+  height: 3.65in;
+  margin-top: 0.2in;
+  background: #07100e;
+}
+
+.maintenance-visual img {
+  object-fit: contain;
+  background: #07100e;
+}
+
+.driver-top {
+  display: grid;
+  grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+  gap: 0.25in;
+  align-items: stretch;
+}
+
+.driver-top .problem {
+  font-size: 0.118in;
+}
+
+.driver-top .problem li {
+  padding-top: 0.1in;
+  padding-bottom: 0.1in;
+}
+
+.driver-visual {
+  min-height: 5.35in;
+  border-color: rgba(0, 200, 83, 0.24);
+  background: #090e12;
+}
+
+.driver-visual img {
+  object-fit: cover;
+  object-position: top center;
+}
+
+.cards {
+  display: grid;
+  gap: 0.12in;
+}
+
+.cards.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 0.16in;
+}
+
+.card,
+.process,
+.boundary,
+.cta {
+  padding: 0.15in;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid var(--line);
+  border-radius: 0.08in;
+}
+
+.dark .card,
+.dark .process,
+.dark .boundary {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.card h2,
+.process h2,
+.boundary h2,
+.cta h2 {
+  margin: 0 0 0.07in;
+  font-size: 0.14in;
+  line-height: 1.14;
+  letter-spacing: 0;
+}
+
+.card p,
+.boundary p,
+.cta p {
+  margin: 0;
+  font-size: 0.118in;
+  line-height: 1.36;
+}
+
+.card p {
+  color: #485953;
+}
+
+.dark .card p {
+  color: #bfd0ca;
+}
+
+.process h2,
+.boundary h2,
+.cta h2 {
+  color: var(--green-dark);
+  font-size: 0.118in;
+  text-transform: uppercase;
+}
+
+.dark .process h2,
+.dark .boundary h2 {
+  color: var(--green);
+}
+
+.process ol {
+  margin: 0;
+  padding-left: 0.2in;
+  display: grid;
+  gap: 0.055in;
+  font-size: 0.112in;
+  line-height: 1.32;
+  color: #324741;
+}
+
+.dark .process ol {
+  color: #cfdfd9;
+}
+
+.boundary {
+  border-color: rgba(211, 155, 42, 0.55);
+  background: rgba(255, 250, 235, 0.95);
+}
+
+.dark .boundary {
+  background: rgba(211, 155, 42, 0.13);
+  border-color: rgba(211, 155, 42, 0.5);
+}
+
+.cta {
+  background: var(--green);
+  border-color: var(--green);
+  color: #03110a;
+}
+
+.cta h2,
+.cta p,
+.dark .cta h2,
+.dark .cta p {
+  color: #03110a;
+}
+
+.cta p {
+  font-weight: 850;
+}
+
+.fit {
+  margin: 0.12in 0 0;
+  font-size: 0.112in;
+  line-height: 1.34;
+  color: #60706b;
+}
+
+.dark .fit {
+  color: #9fb2ab;
+}
+
+.fit strong {
+  color: inherit;
+}
+
+.footer-grid {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr 0.82fr;
+  gap: 0.12in;
+  margin-top: 0.15in;
+  align-items: stretch;
+}
+
+.route-sheet .cards.three {
+  margin-top: 0.13in;
+}
+
+.route-sheet .fit {
+  margin-top: 0.08in;
+}
+
+.route-sheet .footer-grid {
+  margin-top: 0.1in;
+}
+
+.route-sheet .process,
+.route-sheet .boundary,
+.route-sheet .cta {
+  padding: 0.12in;
+}
+
+.route-sheet .process ol {
+  gap: 0.035in;
+  font-size: 0.105in;
+  line-height: 1.25;
+}
+
+.split-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.92fr);
+  gap: 0.16in;
+  margin-top: 0.18in;
+  align-items: start;
+}
+
+.split-grid .cards {
+  gap: 0.1in;
+}
+
+.split-grid .card {
+  padding: 0.13in 0.15in;
+}
+
+.side-panel {
+  display: grid;
+  gap: 0.1in;
+}
+
+.driver-sheet .cards.three {
+  margin-top: 0.18in;
+}
+
+.driver-sheet .footer-grid {
+  grid-template-columns: 1.06fr 0.94fr 0.78fr;
+}
+
+@media print {
+  html,
+  body {
+    width: 8.27in;
+    height: 11.69in;
+    background: transparent;
+  }
+
+  .sheet {
+    margin: 0;
+  }
+}

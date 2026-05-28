@@ -1,0 +1,4 @@
+interface:
+  display_name: "Imoto One-Pagers"
+  short_description: "Create polished Imoto one-page PDFs"
+  default_prompt: "Use $imoto-one-pagers to draft and export a customer-ready Imoto one-pager PDF."
