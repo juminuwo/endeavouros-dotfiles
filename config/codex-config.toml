@@ -35,5 +35,13 @@ trusted_hash = "sha256:3e47564ba7a1bf08ab0f9eda9e25837c299f8f1a3c213d98861ecc4bf
 [hooks.state."/home/howis/.codex/hooks.json:stop:0:0"]
 trusted_hash = "sha256:e936b38e7d8237861544d2b508ebba101d019d1f242c8a577cfeca9961d3518a"
 
+[mcp_servers.zen-browser]
+command = "/home/howis/.nvm/versions/node/v25.2.1/bin/node"
+args = ["/home/howis/git/zen-mcp/server.mjs"]
+env = { ZEN_DEBUG_PORT = "9223", ZEN_COMMAND = "/usr/bin/zen-browser", ZEN_LAUNCH_HINT = "ZEN_DEBUG_PORT=9223 /home/howis/git/zen-mcp/launch-zen.sh" }
+enabled = true
+startup_timeout_sec = 10
+tool_timeout_sec = 120
+
 [plugins."gmail@openai-curated"]
 enabled = true
