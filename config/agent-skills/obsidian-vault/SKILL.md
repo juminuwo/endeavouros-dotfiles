@@ -52,11 +52,11 @@ Imoto Labs/
 - **Meeting note:** `Meetings/YYYY-MM-DD.md` AND add a row to the `Meetings/Meetings.md` table under the right year.
 - **Release note:** `Releases/YYYY-MM-DD <Name>.md` AND add a row to `Releases/Releases.md`.
 - **New project:** `Projects/<Name>/<Name>.md` AND add a row to `Projects/Projects.md`.
-- **Publish status:** `draft: true` blocks publishing. Do not add it by default to messaging docs; use it only when the user explicitly wants a file hidden.
+- **Publish status:** `draft: true` blocks publishing. Do not add `draft: true` by default to Imoto Labs docs; use `draft: false` or omit the field unless the user explicitly wants a file hidden.
 - **Frontmatter:** every file needs YAML frontmatter — `type:` (meeting | decision | spec | strategy | reference | release | index | project | messaging-doc | messaging-doc-guide | credentials), `status:` (active | archived | needs_rewrite | draft), and `date:` for time-bound docs.
 - **Linking:** Obsidian `[[wikilinks]]` for internal navigation, `[text](url)` for external.
-- **Publishing visibility:** `draft: true` prevents a file from publishing. Do not add it unless the user explicitly wants the note hidden.
-- **Hidden from publishing:** private folders are excluded via publishing config or per-file `draft: true` where already present. Do not assume `Messaging/` should be draft-hidden; Driver Shield messaging is intended to publish.
+- **Publishing visibility:** `draft: true` prevents a file from publishing. Do not add it unless the user explicitly wants the note hidden; for normal Imoto Labs work, prefer `draft: false`.
+- **Hidden from publishing:** private folders are excluded via publishing config or per-file `draft: true` where already present. Do not assume `Messaging/` or `Discovery/` should be draft-hidden; Driver Shield messaging and ordinary discovery/strategy docs are intended to publish unless explicitly hidden.
 
 ## Publishing the wiki
 
@@ -123,7 +123,7 @@ When the user asks to save a set of personal drafts/ideas into `Personal/`:
 ### Add or update a messaging doc
 1. Read `Messaging/Messaging.md` for structure and conventions.
 2. Read an existing doc (e.g. `Messaging/Driver Shield.md`) for the template.
-3. Create `Messaging/<Product>.md` with `type: messaging-doc`. Set `draft: true` only if the user explicitly wants the file hidden from publishing.
+3. Create `Messaging/<Product>.md` with `type: messaging-doc`. Set `draft: false` by default; set `draft: true` only if the user explicitly wants the file hidden from publishing.
 4. Add a link under "Existing docs" in `Messaging/Messaging.md`.
 5. For Driver Shield procurement / pilot-rig cost-basis edits, also consult `references/driver-shield-procurement-messaging.md` for the current framing: fleet-budget new-build is the default path; 4K builds are other/reference paths.
 
