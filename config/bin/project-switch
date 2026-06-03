@@ -284,6 +284,36 @@ _ensure_hidden_parked() {
     i3-msg -- "[con_mark=\"^proj:${name}:claude\$\"] move container to workspace ${hc}, floating disable" >/dev/null 2>&1 || true
 }
 
+# If a delete is blocked by kitty's close confirmation, put the target project
+# back in front of the user so they can answer the prompt. This is deliberately
+# move-based instead of _do_switch because one role may already have closed.
+_focus_blocked_delete_target() {
+    local target="$1" preferred_ws="${2:-}"
+    local active; active=$(_current_project || true)
+
+    if [[ -n "$active" && "$active" != "$target" ]]; then
+        _stash_active "$active"
+    fi
+
+    local focus_ws="" role mark ws
+    for role in claude misc; do
+        mark="proj:${target}:${role}"
+        _mark_exists "$mark" || continue
+        ws=$(_ws_for_role "$role")
+        i3-msg -- "[con_mark=\"^${mark}\$\"] move container to workspace number ${ws}, floating disable" >/dev/null 2>&1 || true
+        if [[ "$ws" == "$preferred_ws" ]]; then
+            focus_ws="$ws"
+        elif [[ -z "$focus_ws" ]]; then
+            focus_ws="$ws"
+        fi
+    done
+
+    if [[ -n "$focus_ws" ]]; then
+        i3-msg -- "workspace number ${focus_ws}" >/dev/null
+        _history_touch "$target"
+    fi
+}
+
 # ---------------------------------------------------------------------------
 # subcommands
 # ---------------------------------------------------------------------------
@@ -519,6 +549,12 @@ cmd_delete() {
         _die "cannot delete '$target': it is the only project (create another first)"
     fi
 
+    local initial_focus; initial_focus=$(_focused_ws)
+    local preferred_ws=""
+    case "$initial_focus" in
+        "$WS_MISC"|"$WS_CLAUDE") preferred_ws="$initial_focus" ;;
+    esac
+
     # If deleting the active project, swap to a fallback first so the kill
     # happens against an inactive project — its windows are on hidden
     # workspaces, which disappear cleanly when emptied.
@@ -544,6 +580,8 @@ cmd_delete() {
 
     if [[ "$after" -gt 0 ]]; then
         _log "delete: blocked by kitty close-confirmation (still=$after); aborting"
+        _focus_blocked_delete_target "$target" "$preferred_ws"
+        _signal_i3blocks
         command -v notify-send >/dev/null && \
             notify-send -t 30000 "project-switch" \
                 "Delete '$target' blocked — kitty is showing a close confirmation (running processes). Answer it, then try again." || true
