@@ -1,0 +1,18 @@
+[Unit]
+Description=Driver Shield MAIN-demo API
+Documentation=file:///home/howis/git/driver-shield/docs/runbooks/Demo%%20Stack%%20Restart%%20Runbook.md
+PartOf=work.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/howis/git/driver-shield
+Environment=DRIVER_SHIELD_HOST=MAIN-demo
+Environment=PATH=/home/howis/.local/bin:/home/howis/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/home/howis/.local/bin/uv run driver-shield
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=work.target

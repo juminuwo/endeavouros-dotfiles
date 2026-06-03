@@ -1,0 +1,19 @@
+[Unit]
+Description=rclone pCloud mount
+
+[Service]
+Type=notify
+ExecStartPre=/bin/mkdir -p %h/pcloud
+ExecStart=/usr/bin/rclone mount pcloud: %h/pcloud \
+    --vfs-cache-mode full \
+    --vfs-cache-max-age 24h \
+    --vfs-cache-max-size 5G \
+    --dir-cache-time 5m \
+    --log-level INFO \
+    --log-file %h/.local/share/rclone/pcloud.log
+ExecStop=/bin/fusermount -u %h/pcloud
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

@@ -16,7 +16,7 @@ This repo is the source of truth for system config (i3, Kitty, zsh, Hermes, Code
 | A `~/bin/` or `~/.local/bin/` script | `config/<name>` (or `config/bin/<name>` for `~/.local/bin`) | add `link:` entry, `chmod +x` the source, run `./install` |
 | A portable dependency | `config/packages-repo.txt` (pacman) or `config/packages-aur.txt` (AUR). Decide with `pacman -Si <pkg>`: `Repository: extra/core/multilib` → repo file; `Repository: aur` (or not found) → AUR file. | run `./install-packages` |
 | A hardware-specific package (NVIDIA, Intel ucode, etc.) | `config/host/packages-host-repo.txt` | run `./host-install` |
-| A systemd unit | `config/host/systemd/{system,user}/` | extend `host-install`, re-run it |
+| A systemd unit | `config/host/systemd/{system,user}/` | choose `default.target`, `work.target`, or `timers.target`; extend `host-install`; re-run it |
 | A shared agent skill | `config/agent-skills/<name>/SKILL.md` | Codex/Claude are linked via `install.conf.yaml`; Hermes reads the whole directory through `skills.external_dirs`. Run `./install`, then restart agents or reload skills. |
 
 ## Conventions
@@ -26,6 +26,7 @@ This repo is the source of truth for system config (i3, Kitty, zsh, Hermes, Code
 - After adding/removing a `link:` entry, run `./install` to apply.
 - Reload i3 after touching `config/i3/config`: `i3-msg reload`.
 - After editing a script driven by a systemd unit, restart the unit: `systemctl --user restart <name>` (e.g. `mmo-mouse-workspaces.service`). The symlink edit is live in the file but the daemon has cached state / a running interpreter.
+- User services are grouped by intent: personal always-on services use `default.target`; work services use `work.target` with `PartOf=work.target` and `WantedBy=work.target`; scheduled jobs use `timers.target`. `services-workflow audit` shows the current state.
 - After editing an i3blocks block script (`config/bin/i3blocks-*`), signal i3blocks to re-run the block: `pkill -RTMIN+<N> i3blocks` where `<N>` matches the block's `signal=` line in `config/i3/i3blocks.conf`. Without this, the bar shows cached output until its `interval` ticks.
 - **Workspaces 6 and 7 are reserved for project-switch** (kitty pairs managed via i3 marks + workspace renames). Nothing else should spawn windows there — including i3-resurrect, scratchpad rules, or `for_window` placements. Adding such a rule collides with project-switch's mark/rename state and silently breaks project switching.
 - Don't hand-write files into `~` when a dotbot-managed equivalent exists — edit the source under `config/` instead.

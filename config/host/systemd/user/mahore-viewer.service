@@ -1,0 +1,14 @@
+[Unit]
+Description=Mahore Nested Thumbnail Viewer (port 47823)
+
+[Service]
+Type=simple
+WorkingDirectory=/home/howis/git/nested-thumbnail-viewer
+ExecStart=/home/howis/git/nested-thumbnail-viewer/scripts/start-server-mahore.sh
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

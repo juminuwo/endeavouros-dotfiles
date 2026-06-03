@@ -1,0 +1,12 @@
+[Unit]
+Description=Business Scout Slack Bot
+
+[Service]
+Type=simple
+WorkingDirectory=/home/howis/git/business-scout
+ExecStart=/home/howis/.local/bin/uv run python -m slack_bot.bot
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

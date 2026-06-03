@@ -3,9 +3,8 @@
 #   - hardware-specific packages from config/host/packages-host-repo.txt
 #       (NVIDIA driver/CUDA, Intel microcode, etc. — varies per machine)
 #   - /etc/systemd/system/drive-sync.{service,timer}            (system, root)
-#   - ~/.config/systemd/user/credit-claim.{service,timer}       (user)
-#   - ~/.config/systemd/user/imoto-wiki-publish.{service,timer} (user)
-#   - ~/.config/systemd/user/hermes-restic-backup.{service,timer} (user)
+#   - host-specific ~/.config/systemd/user/*.service/*.timer/*.target
+#   - user unit enablement groups: default.target, work.target, timers.target
 #
 # Idempotent: safe to re-run after editing the unit files in this repo.
 
@@ -17,6 +16,24 @@ USER_SRC="$BASEDIR/config/host/systemd/user"
 USER_DST="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 
 say() { printf '\n=== %s ===\n' "$*"; }
+
+enable_user_units() {
+  local units=("$@")
+  local existing=()
+  local unit
+
+  for unit in "${units[@]}"; do
+    if systemctl --user cat "$unit" >/dev/null 2>&1; then
+      existing+=("$unit")
+    else
+      printf 'Skipping %s; unit file is not installed.\n' "$unit"
+    fi
+  done
+
+  if ((${#existing[@]})); then
+    systemctl --user enable --now "${existing[@]}"
+  fi
+}
 
 # ------------------------------------------------------------------
 # Hardware-specific packages (NVIDIA + Intel ucode on this host)
@@ -39,37 +56,44 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now drive-sync.timer
 
 # ------------------------------------------------------------------
-# User units (credit-claim)
+# User units — copied into ~/.config/systemd/user
 # ------------------------------------------------------------------
-say "Installing user units (credit-claim)"
-
+say "Installing host user units"
 mkdir -p "$USER_DST"
-install -m 644 "$USER_SRC/credit-claim.service" "$USER_DST/credit-claim.service"
-install -m 644 "$USER_SRC/credit-claim.timer"   "$USER_DST/credit-claim.timer"
+
+while IFS= read -r -d '' unit_file; do
+  install -m 644 "$unit_file" "$USER_DST/$(basename "$unit_file")"
+done < <(find "$USER_SRC" -maxdepth 1 -type f \( -name '*.service' -o -name '*.timer' -o -name '*.target' \) -print0 | sort -z)
+
+# hermes-gateway-driver-shield-slack.service used to be installed directly
+# under default.target. It now belongs to work.target only.
+rm -f "$USER_DST/default.target.wants/hermes-gateway-driver-shield-slack.service"
 
 systemctl --user daemon-reload
-systemctl --user enable --now credit-claim.timer
 
 # ------------------------------------------------------------------
-# User units (imoto-wiki-publish)
+# User unit enablement
 # ------------------------------------------------------------------
-say "Installing user units (imoto-wiki-publish)"
+say "Enabling default user services"
+enable_user_units \
+  hermes-gateway.service \
+  kittylitter.service \
+  mahore-viewer.service \
+  mmo-mouse-workspaces.service \
+  rclone-pcloud.service
 
-install -m 644 "$USER_SRC/imoto-wiki-publish.service" "$USER_DST/imoto-wiki-publish.service"
-install -m 644 "$USER_SRC/imoto-wiki-publish.timer"   "$USER_DST/imoto-wiki-publish.timer"
+say "Enabling automatic work target"
+enable_user_units \
+  work.target \
+  driver-shield-main-demo.service \
+  hermes-gateway-driver-shield-slack.service
 
-systemctl --user daemon-reload
-systemctl --user enable --now imoto-wiki-publish.timer
+say "Enabling user timers"
+enable_user_units \
+  credit-claim.timer \
+  imoto-wiki-publish.timer
 
-# ------------------------------------------------------------------
-# User units (hermes-restic-backup)
-# ------------------------------------------------------------------
 say "Installing user units (hermes-restic-backup)"
-
-install -m 644 "$USER_SRC/hermes-restic-backup.service" "$USER_DST/hermes-restic-backup.service"
-install -m 644 "$USER_SRC/hermes-restic-backup.timer"   "$USER_DST/hermes-restic-backup.timer"
-
-systemctl --user daemon-reload
 if [[ -r "$HOME/.config/restic/hermes-password" ]]; then
   systemctl --user enable --now hermes-restic-backup.timer
 else
@@ -82,5 +106,6 @@ fi
 say "Verifying timer status"
 systemctl list-timers --all --no-pager | grep -E 'drive-sync|credit-claim|imoto-wiki' || true
 systemctl --user list-timers --all --no-pager | grep -E 'credit-claim|imoto-wiki|hermes-restic' || true
+systemctl --user list-dependencies work.target --plain --no-pager || true
 
 say "Done."

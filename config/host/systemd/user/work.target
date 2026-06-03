@@ -1,0 +1,6 @@
+[Unit]
+Description=Work services
+Documentation=file:///home/howis/git/endeavouros-dotfiles/README.md
+
+[Install]
+WantedBy=default.target

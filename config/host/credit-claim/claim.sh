@@ -127,6 +127,10 @@ if [ "$HTTP_STATUS" = "401" ] || [ "$HTTP_STATUS" = "403" ] || [ "$CODE" = "401"
     exit 1
 fi
 
+if [ "$CODE" = "400" ] && [ "$MSG" = "not in time" ]; then
+    exit 0
+fi
+
 if [ "$CODE" = "200" ]; then
     delay_timer_after_success "$RESPONSE"
     exit 0

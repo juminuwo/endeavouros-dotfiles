@@ -1,0 +1,12 @@
+[Unit]
+Description=Alleycat bridge daemon
+
+[Service]
+Type=simple
+ExecStart=/home/howis/.npm/_npx/75a33253e6ddbadb/node_modules/kittylitter/node_modules/.bin_real/kittylitter serve
+Environment="PATH=/home/howis/.npm/_npx/75a33253e6ddbadb/node_modules/.bin:/home/howis/git/node_modules/.bin:/home/howis/node_modules/.bin:/home/node_modules/.bin:/home/howis/.nvm/versions/node/v25.2.1/lib/node_modules/npm/node_modules/@npmcli/run-script/lib/node-gyp-bin:/home/howis/.local/share/reflex/bun/bin:/home/howis/.nvm/versions/node/v25.2.1/bin:/home/howis/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/opt/cuda/bin:/usr/lib/jvm/default/bin:/usr/bin/site_perl:/usr/bin/vendor_perl:/usr/bin/core_perl"
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

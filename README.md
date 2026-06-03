@@ -31,7 +31,7 @@ Driven by `install.conf.yaml`. Creates symlinks from `~` into `config/`, replaci
 | zsh, X11, git | `~/.zshrc`, `~/.xprofile`, `~/.Xmodmap`, `~/.gitconfig`, `~/.config/git/ignore` |
 | SSH client config | `~/.ssh/config` |
 | Hermes/Codex/Claude agent config | `~/.codex/{config.toml,hooks.json,agents/*}`, `~/.agents/skills/*`, `~/.claude/{settings.json,keybindings.json,skills/*}`; Hermes reads `config/agent-skills/` via `skills.external_dirs` |
-| User scripts in PATH | `~/bin/{clip-img,claude-notify}`, `~/.local/bin/{agents-dashboard,agents-dashboard-spawn,restore_i3_session,save_i3_session,soundwire-tray,backup-hermes-restic,hermes-notify-hook}` |
+| User scripts in PATH | `~/bin/{clip-img,claude-notify}`, `~/.local/bin/{agents-dashboard,agents-dashboard-spawn,restore_i3_session,save_i3_session,soundwire-tray,backup-hermes-restic,hermes-notify-hook,services-workflow}` |
 | User systemd units | `~/.config/systemd/user/mmo-mouse-workspaces.service`; host install also copies host-specific user units such as `hermes-restic-backup.{service,timer}` |
 | Top-level repo agent context | `~/git/AGENTS.md`, `~/git/CLAUDE.md` |
 
@@ -47,8 +47,50 @@ Installs the systemd units that **can't** be symlinked because they need to live
 | `credit-claim.{service,timer}` | `~/.config/systemd/user/` | Daily oneshot, starting at 10:10 and moving 30s later after each success |
 | `imoto-wiki-publish.{service,timer}` | `~/.config/systemd/user/` | Periodic Imoto wiki publish job |
 | `hermes-restic-backup.{service,timer}` | `~/.config/systemd/user/` | Encrypted restic backup of Hermes state and canonical agent skills |
+| `work.target` | `~/.config/systemd/user/` | Automatic group for work services |
+| `driver-shield-main-demo.service` | `~/.config/systemd/user/` | Driver Shield MAIN-demo API on port 8010 |
+| `hermes-gateway-driver-shield-slack.service` | `~/.config/systemd/user/` | Driver Shield Slack Hermes gateway, grouped under `work.target` |
+| `hermes-gateway.service` and personal daemons | `~/.config/systemd/user/` | Always-on user services under `default.target` |
 
-After install, timers are reloaded and `enable --now`'d. The Hermes restic timer is only enabled when `~/.config/restic/hermes-password` exists. Re-run `./host-install` whenever you edit the unit files in `config/host/systemd/`.
+After install, timers and service groups are reloaded and enabled. The Hermes restic timer is only enabled when `~/.config/restic/hermes-password` exists. Re-run `./host-install` whenever you edit the unit files in `config/host/systemd/`.
+
+## User service workflow
+
+User services are grouped by intent:
+
+| Group | Target | Rule |
+|---|---|---|
+| Personal/default | `default.target` | Small background services that should be available on this machine whenever the user manager is running |
+| Work | `work.target` | Work daemons and project APIs; `work.target` is enabled by `default.target` on this host |
+| Timers | `timers.target` | Scheduled jobs, even when they support work projects |
+
+Common commands:
+
+```bash
+services-workflow audit
+services-workflow work status
+services-workflow work stop
+services-workflow work start
+services-workflow work logs
+services-workflow failed
+```
+
+Add a work service with:
+
+```ini
+[Unit]
+PartOf=work.target
+
+[Install]
+WantedBy=work.target
+```
+
+Add an always-on personal service with:
+
+```ini
+[Install]
+WantedBy=default.target
+```
 
 ## Repo layout
 
@@ -65,7 +107,7 @@ endeavouros-dotfiles/
 │       ├── jellyfin/                # docker-compose for Jellyfin
 │       ├── change-backup-uuid.sh    # one-off util
 │       ├── find-drive-uuids.sh      # one-off util
-│       └── systemd/{system,user}/   # unit files installed by host-install
+│       └── systemd/{system,user}/   # unit files installed and enabled by host-install
 ├── install                          # dotbot wrapper
 ├── install-packages                 # pacman + yay package installer
 ├── host-install                     # systemd unit installer (sudo)
@@ -78,7 +120,7 @@ endeavouros-dotfiles/
 - **`config/host/`** = machine-specific (drive UUIDs, services tied to local hardware). Copied/referenced by absolute path; not symlinked.
 - Adding a new dotfile: drop it under `config/`, add a `link:` entry in `install.conf.yaml`, run `./install`.
 - Adding a shared personal skill: add `config/agent-skills/<name>/SKILL.md`, add Codex/Claude symlinks in `install.conf.yaml`, run `./install`, then reload/restart the target agent. Hermes uses the whole parent directory via `skills.external_dirs`.
-- Adding a new systemd unit: drop it under `config/host/systemd/{system,user}/`, extend `host-install`, re-run it.
+- Adding a new systemd unit: drop it under `config/host/systemd/{system,user}/`, choose `default.target`, `work.target`, or `timers.target`, extend `host-install` if it needs automatic enablement, then re-run it.
 
 ## Manual host steps (not automated)
 

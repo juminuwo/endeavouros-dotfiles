@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  services-workflow audit
+  services-workflow failed
+  services-workflow timers
+  services-workflow work start|stop|restart|status|deps|logs
+  services-workflow unit UNIT status|logs|restart|enable|disable
+USAGE
+}
+
+user_unit_files() {
+  find "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user" -maxdepth 2 \( -type f -o -type l \) \
+    -printf '%y %p -> %l\n' 2>/dev/null | sort
+}
+
+cmd=${1:-audit}
+shift || true
+
+case "$cmd" in
+  audit)
+    printf '\n== User unit files ==\n'
+    user_unit_files
+    printf '\n== Enabled user unit files ==\n'
+    systemctl --user list-unit-files --state=enabled --no-pager
+    printf '\n== Work target ==\n'
+    systemctl --user list-dependencies work.target --plain --no-pager || true
+    printf '\n== Failed units ==\n'
+    systemctl --user --failed --no-pager || true
+    ;;
+  failed)
+    printf '\n== Failed user units ==\n'
+    systemctl --user --failed --no-pager || true
+    printf '\n== Failed system units ==\n'
+    systemctl --failed --no-pager || true
+    ;;
+  timers)
+    printf '\n== User timers ==\n'
+    systemctl --user list-timers --all --no-pager
+    printf '\n== System timers ==\n'
+    systemctl list-timers --all --no-pager
+    ;;
+  work)
+    subcmd=${1:-status}
+    case "$subcmd" in
+      start|stop|restart|status)
+        systemctl --user "$subcmd" work.target
+        ;;
+      deps)
+        systemctl --user list-dependencies work.target --plain --no-pager
+        ;;
+      logs)
+        journalctl --user \
+          -u driver-shield-main-demo.service \
+          -u hermes-gateway-driver-shield-slack.service \
+          -f
+        ;;
+      *)
+        usage
+        exit 2
+        ;;
+    esac
+    ;;
+  unit)
+    unit=${1:-}
+    subcmd=${2:-status}
+    if [[ -z "$unit" ]]; then
+      usage
+      exit 2
+    fi
+    case "$subcmd" in
+      status|restart|enable|disable)
+        systemctl --user "$subcmd" "$unit"
+        ;;
+      logs)
+        journalctl --user -u "$unit" -f
+        ;;
+      *)
+        usage
+        exit 2
+        ;;
+    esac
+    ;;
+  -h|--help|help)
+    usage
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
+esac
