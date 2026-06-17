@@ -94,7 +94,7 @@ WantedBy=default.target
 
 ## Scheduled dotfiles autoupdate
 
-`config/bin/dotfiles-autoupdate` is the approval-gated scanner for keeping this repo aligned with the live machine. Hermes runs it daily at 19:00 and delivers output only to the Discord DM target `discord:isitokaymimi`.
+`config/bin/dotfiles-autoupdate` is the approval-gated scanner for keeping this repo aligned with the live machine. Hermes runs the scanner daily at 19:00 and delivers output only to the Discord DM target `discord:isitokaymimi`. A second Hermes cron job checks that DM every 5 minutes for approval replies and applies the pending request without relying on the active chat context.
 
 Commands:
 
@@ -103,6 +103,7 @@ dotfiles-autoupdate scan          # read-only; prints nothing when there are no 
 dotfiles-autoupdate show <id>     # show a pending Discord approval request
 dotfiles-autoupdate apply <id>    # apply exactly the approved request, commit, and push
 dotfiles-autoupdate reject <id>   # reject a pending request
+dotfiles-autoupdate approvals     # check Discord gateway history for approval replies
 ```
 
 The scanner tracks high-confidence drift only:
@@ -112,7 +113,7 @@ The scanner tracks high-confidence drift only:
 - dotbot link health from `install.conf.yaml`
 - package drift between package manifests and explicit live installs, reported only
 
-Package drift is report-only unless explicitly classified and approved. The apply step refuses to continue if the repo branch, HEAD, live unit hashes, or working-tree state changed after the scan.
+Package drift is report-only unless explicitly classified and approved. The apply step refuses to continue if the repo branch, HEAD, live unit hashes, or working-tree state changed after the scan. `approve dotfiles <id>` is preferred, but a bare `Approved` also works when exactly one pending dotfiles request exists.
 
 ## Repo layout
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import json
 import subprocess
 import sys
 from importlib.machinery import SourceFileLoader
@@ -138,7 +139,7 @@ def test_apply_request_refuses_head_mismatch(tmp_path):
     repo = tmp_path / "repo"
     init_repo(repo)
     request = {
-        "id": "20260101T000000-deadbeef",
+        "id": "20260101T000000Z-deadbeef",
         "repo": str(repo),
         "head": "not-the-current-head",
         "actions": [],
@@ -148,3 +149,68 @@ def test_apply_request_refuses_head_mismatch(tmp_path):
 
     assert result["ok"] is False
     assert "HEAD changed" in result["error"]
+
+
+def test_find_discord_approval_accepts_exact_request_id(tmp_path):
+    mod = load_module()
+    state_dir = tmp_path / "state"
+    pending = state_dir / "pending"
+    pending.mkdir(parents=True)
+    request = {"id": "20260101T000000Z-deadbeef", "created_at": "2026-01-01T00:00:00+00:00"}
+    (pending / "20260101T000000Z-deadbeef.json").write_text(json.dumps(request))
+    log = tmp_path / "gateway.log"
+    log.write_text(
+        "2026-01-01 00:05:00,000 INFO gateway.run: inbound message: "
+        "platform=discord user=isitokaymimi chat=1506284995818553374 "
+        "msg='approve dotfiles 20260101T000000Z-deadbeef' reply_to_id=None reply_to_text=''\n"
+    )
+
+    approval = mod.find_discord_approval(state_dir=state_dir, log_path=log)
+
+    assert approval == {
+        "request_id": "20260101T000000Z-deadbeef",
+        "mode": "explicit",
+        "message": "approve dotfiles 20260101T000000Z-deadbeef",
+    }
+
+
+def test_find_discord_approval_accepts_bare_approved_for_single_pending_request(tmp_path):
+    mod = load_module()
+    state_dir = tmp_path / "state"
+    pending = state_dir / "pending"
+    pending.mkdir(parents=True)
+    request = {"id": "20260101T000000Z-deadbeef", "created_at": "2026-01-01T00:00:00+00:00"}
+    (pending / "20260101T000000Z-deadbeef.json").write_text(json.dumps(request))
+    log = tmp_path / "gateway.log"
+    log.write_text(
+        "2026-01-01 00:05:00,000 INFO gateway.run: inbound message: "
+        "platform=discord user=isitokaymimi chat=1506284995818553374 "
+        "msg='Approved' reply_to_id=None reply_to_text=''\n"
+    )
+
+    approval = mod.find_discord_approval(state_dir=state_dir, log_path=log)
+
+    assert approval == {
+        "request_id": "20260101T000000Z-deadbeef",
+        "mode": "single-pending-bare-approved",
+        "message": "Approved",
+    }
+
+
+def test_find_discord_approval_ignores_bare_approved_when_multiple_requests_pending(tmp_path):
+    mod = load_module()
+    state_dir = tmp_path / "state"
+    pending = state_dir / "pending"
+    pending.mkdir(parents=True)
+    for request_id in ("20260101T000000Z-deadbeef", "20260101T000100Z-feedface"):
+        (pending / f"{request_id}.json").write_text(
+            json.dumps({"id": request_id, "created_at": "2026-01-01T00:00:00+00:00"})
+        )
+    log = tmp_path / "gateway.log"
+    log.write_text(
+        "2026-01-01 00:05:00,000 INFO gateway.run: inbound message: "
+        "platform=discord user=isitokaymimi chat=1506284995818553374 "
+        "msg='Approved' reply_to_id=None reply_to_text=''\n"
+    )
+
+    assert mod.find_discord_approval(state_dir=state_dir, log_path=log) is None

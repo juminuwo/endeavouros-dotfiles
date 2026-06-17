@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import datetime as dt
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -18,6 +20,9 @@ from typing import Iterable
 REPO = Path(__file__).resolve().parents[2]
 DEFAULT_STATE_DIR = Path(os.environ.get("DOTFILES_AUTOUPDATE_STATE_DIR", "~/.cache/dotfiles-autoupdate")).expanduser()
 UNIT_SUFFIXES = {".service", ".timer", ".target"}
+REQUEST_ID_RE = re.compile(r"\b\d{8}T\d{6}Z-[0-9a-f]{8}\b")
+APPROVE_RE = re.compile(r"^approve\s+dotfiles\s+(?P<id>\d{8}T\d{6}Z-[0-9a-f]{8})$", re.IGNORECASE)
+DISCORD_INBOUND_RE = re.compile(r"^(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+ .*inbound message: .*platform=discord .*user=isitokaymimi .* msg=(?P<msg>'.*?'|\".*?\") reply_to_id=")
 
 
 def run(cmd: list[str], *, cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -302,6 +307,7 @@ def format_discord_message(scan: dict[str, object]) -> str:
         "",
         "Reply in Discord:",
         f"approve dotfiles {request_id}",
+        "Approved  # also works when this is the only pending dotfiles request",
         f"show dotfiles {request_id}",
         f"reject dotfiles {request_id}",
     ])
@@ -328,6 +334,83 @@ def load_pending(request_id: str, state_dir: Path = DEFAULT_STATE_DIR) -> dict[s
     if not path.exists():
         raise FileNotFoundError(f"No pending dotfiles request: {request_id}")
     return json.loads(path.read_text())
+
+
+def pending_requests(state_dir: Path = DEFAULT_STATE_DIR) -> list[dict[str, object]]:
+    requests: list[dict[str, object]] = []
+    for path in sorted(pending_dir(state_dir).glob("*.json"), key=lambda item: item.stat().st_mtime):
+        try:
+            requests.append(json.loads(path.read_text()))
+        except json.JSONDecodeError:
+            continue
+    return requests
+
+
+def archive_request(request: dict[str, object], state_dir: Path, status: str, result: dict[str, object] | None = None) -> None:
+    request_id = str(request["id"])
+    archived = dict(request)
+    archived["status"] = status
+    archived["archived_at"] = dt.datetime.now(dt.timezone.utc).isoformat()
+    if result is not None:
+        archived["result"] = result
+    archive_dir = state_dir / status
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    (archive_dir / f"{request_id}.json").write_text(json.dumps(archived, indent=2, sort_keys=True) + "\n")
+    path = pending_path(request_id, state_dir)
+    if path.exists():
+        path.unlink()
+
+
+def request_created_local(request: dict[str, object]) -> dt.datetime:
+    created = str(request.get("created_at") or "1970-01-01T00:00:00+00:00")
+    parsed = dt.datetime.fromisoformat(created)
+    if parsed.tzinfo is None:
+        return parsed
+    return parsed.astimezone().replace(tzinfo=None)
+
+
+def discord_inbound_messages(log_path: Path) -> list[dict[str, object]]:
+    if not log_path.exists():
+        return []
+    messages: list[dict[str, object]] = []
+    for line in log_path.read_text(errors="replace").splitlines():
+        match = DISCORD_INBOUND_RE.search(line)
+        if not match:
+            continue
+        try:
+            message = ast.literal_eval(match.group("msg"))
+            timestamp = dt.datetime.strptime(match.group("ts"), "%Y-%m-%d %H:%M:%S")
+        except (SyntaxError, ValueError):
+            continue
+        messages.append({"timestamp": timestamp, "message": message})
+    return messages
+
+
+def find_discord_approval(
+    *,
+    state_dir: Path = DEFAULT_STATE_DIR,
+    log_path: Path = Path("~/.hermes/logs/gateway.log").expanduser(),
+) -> dict[str, str] | None:
+    pending = {str(request["id"]): request for request in pending_requests(state_dir)}
+    if not pending:
+        return None
+
+    for event in reversed(discord_inbound_messages(log_path)):
+        message = str(event["message"]).strip()
+        approved_at = event["timestamp"]
+        explicit = APPROVE_RE.match(message)
+        if explicit:
+            request_id = explicit.group("id")
+            request = pending.get(request_id)
+            if request and approved_at >= request_created_local(request):
+                return {"request_id": request_id, "mode": "explicit", "message": message}
+
+        if message.lower() in {"approved", "approve"} and len(pending) == 1:
+            request_id, request = next(iter(pending.items()))
+            if approved_at >= request_created_local(request):
+                return {"request_id": request_id, "mode": "single-pending-bare-approved", "message": message}
+
+    return None
 
 
 def current_status_for_paths(repo: Path, planned_status: list[str]) -> tuple[bool, str]:
@@ -423,22 +506,45 @@ def command_show(args: argparse.Namespace) -> int:
 def command_reject(args: argparse.Namespace) -> int:
     state_dir = Path(args.state_dir).expanduser()
     request = load_pending(args.request_id, state_dir)
-    request["status"] = "rejected"
-    rejected = state_dir / "rejected"
-    rejected.mkdir(parents=True, exist_ok=True)
-    (rejected / f"{args.request_id}.json").write_text(json.dumps(request, indent=2, sort_keys=True) + "\n")
-    pending_path(args.request_id, state_dir).unlink()
+    archive_request(request, state_dir, "rejected")
     print(f"Rejected dotfiles request {args.request_id}")
     return 0
 
 
 def command_apply(args: argparse.Namespace) -> int:
-    request = load_pending(args.request_id, Path(args.state_dir).expanduser())
+    state_dir = Path(args.state_dir).expanduser()
+    request = load_pending(args.request_id, state_dir)
     result = apply_request(request, dry_run=args.dry_run)
     if not result["ok"]:
         print(f"Dotfiles apply failed: {result['error']}", file=sys.stderr)
         return 1
+    if not args.dry_run:
+        archive_request(request, state_dir, "applied", result)
     print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def command_approvals(args: argparse.Namespace) -> int:
+    state_dir = Path(args.state_dir).expanduser()
+    approval = find_discord_approval(state_dir=state_dir, log_path=Path(args.log_path).expanduser())
+    if approval is None:
+        return 0
+
+    request = load_pending(approval["request_id"], state_dir)
+    result = apply_request(request)
+    if not result["ok"]:
+        archive_request(request, state_dir, "failed", {**result, "approval": approval})
+        print(f"Dotfiles approval {approval['request_id']} failed: {result['error']}")
+        return 0
+
+    archive_request(request, state_dir, "applied", {**result, "approval": approval})
+    print(
+        "Dotfiles approval applied and pushed.\n"
+        f"Request: {approval['request_id']} ({approval['mode']})\n"
+        f"Commit: {result['commit']}\n"
+        "Paths:\n"
+        + "\n".join(f"- {path}" for path in result["paths"])
+    )
     return 0
 
 
@@ -465,6 +571,10 @@ def build_parser() -> argparse.ArgumentParser:
     apply.add_argument("request_id")
     apply.add_argument("--dry-run", action="store_true")
     apply.set_defaults(func=command_apply)
+
+    approvals = sub.add_parser("approvals", help="check Discord DM history for approvals and apply one pending request")
+    approvals.add_argument("--log-path", default="~/.hermes/logs/gateway.log")
+    approvals.set_defaults(func=command_approvals)
     return parser
 
 

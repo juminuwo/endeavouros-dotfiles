@@ -10,6 +10,7 @@ Use this skill when the user asks from Discord or CLI to approve, show, or rejec
 - `approve dotfiles <request-id>`
 - `show dotfiles <request-id>`
 - `reject dotfiles <request-id>`
+- bare `Approved` in Discord when exactly one pending request exists; the `dotfiles-autoupdate-approvals` Hermes cron job handles this without relying on the active chat context
 
 ## Repository and command
 
@@ -54,6 +55,15 @@ For `approve dotfiles <request-id>`:
    ```
 4. If apply succeeds, report the changed paths, commit SHA, and push result.
 5. If apply fails, report the exact blocker and do not retry destructive steps unless the user approves a revised action.
+
+## Automated approval monitor
+
+Hermes also runs `dotfiles-autoupdate approvals` every 5 minutes via a script-only cron job. It reads `~/.hermes/logs/gateway.log` for Discord DM approvals and applies one pending request when either:
+
+- the message is `approve dotfiles <request-id>`, or
+- the message is bare `Approved` / `approve` and exactly one pending dotfiles request exists.
+
+Because cron deliveries are not mirrored into the active Discord gateway session, do not assume a plain `Approved` message will have the scan summary in LLM context. The approval monitor is the durable path for that case.
 
 ## Safety rules
 
