@@ -31,7 +31,7 @@ Driven by `install.conf.yaml`. Creates symlinks from `~` into `config/`, replaci
 | zsh, X11, git | `~/.zshrc`, `~/.xprofile`, `~/.Xmodmap`, `~/.gitconfig`, `~/.config/git/ignore` |
 | SSH client config | `~/.ssh/config` |
 | Hermes/Codex/Claude agent config | `~/.codex/{config.toml,hooks.json,agents/*}`, `~/.agents/skills/*`, `~/.claude/{settings.json,keybindings.json,skills/*}`; Hermes reads `config/agent-skills/` via `skills.external_dirs` |
-| User scripts in PATH | `~/bin/{clip-img,claude-notify}`, `~/.local/bin/{agents-dashboard,agents-dashboard-spawn,restore_i3_session,save_i3_session,soundwire-tray,backup-hermes-restic,hermes-notify-hook,services-workflow}` |
+| User scripts in PATH | `~/bin/{clip-img,claude-notify}`, `~/.local/bin/{agents-dashboard,agents-dashboard-spawn,restore_i3_session,save_i3_session,soundwire-tray,backup-hermes-restic,hermes-notify-hook,dotfiles-autoupdate,services-workflow}` |
 | User systemd units | `~/.config/systemd/user/mmo-mouse-workspaces.service`; host install also copies host-specific user units such as `hermes-restic-backup.{service,timer}` |
 | Top-level repo agent context | `~/git/AGENTS.md`, `~/git/CLAUDE.md` |
 
@@ -92,6 +92,28 @@ Add an always-on personal service with:
 WantedBy=default.target
 ```
 
+## Scheduled dotfiles autoupdate
+
+`config/bin/dotfiles-autoupdate` is the approval-gated scanner for keeping this repo aligned with the live machine. Hermes runs it daily at 19:00 and delivers output only to the Discord DM target `discord:isitokaymimi`.
+
+Commands:
+
+```bash
+dotfiles-autoupdate scan          # read-only; prints nothing when there are no actionable changes
+dotfiles-autoupdate show <id>     # show a pending Discord approval request
+dotfiles-autoupdate apply <id>    # apply exactly the approved request, commit, and push
+dotfiles-autoupdate reject <id>   # reject a pending request
+```
+
+The scanner tracks high-confidence drift only:
+
+- repo working-tree changes such as `config/codex-config.toml`
+- copied host systemd unit drift between `config/host/systemd/` and the live unit locations
+- dotbot link health from `install.conf.yaml`
+- package drift between package manifests and explicit live installs, reported only
+
+Package drift is report-only unless explicitly classified and approved. The apply step refuses to continue if the repo branch, HEAD, live unit hashes, or working-tree state changed after the scan.
+
 ## Repo layout
 
 ```
@@ -100,7 +122,7 @@ endeavouros-dotfiles/
 │   ├── i3/, nvim/, fcitx5/ ...      # standard application configs
 │   ├── agent-skills/, agent-agents/, codex-agents/, claude-alerts/
 │   ├── packages-{repo,aur}.txt      # package lists for install-packages
-│   ├── bin/                         # scripts → ~/.local/bin/
+│   ├── bin/                         # scripts → ~/.local/bin/ including dotfiles-autoupdate
 │   └── host/                        # machine-specific (NOT symlinked)
 │       ├── sync-drives.sh           # called by drive-sync.service
 │       ├── credit-claim/claim.sh    # called by credit-claim.service

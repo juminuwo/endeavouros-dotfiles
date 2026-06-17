@@ -1,19 +1,18 @@
 [Unit]
-Description=Hermes Gateway - Driver Shield Slack
+Description=Hermes Agent Gateway - Messaging Platform Integration
+After=network-online.target
+Wants=network-online.target
 StartLimitIntervalSec=0
-PartOf=work.target
 
 [Service]
 Type=simple
-ExecStart=/home/howis/.hermes/hermes-agent/venv/bin/python -m hermes_cli.main --profile driver-shield-slack gateway run --replace
+ExecStart=/home/howis/.hermes/hermes-agent/venv/bin/python -m hermes_cli.main --profile driver-shield-slack gateway run
 WorkingDirectory=/home/howis/.hermes/profiles/driver-shield-slack
 Environment="PATH=/home/howis/.hermes/hermes-agent/venv/bin:/home/howis/.hermes/hermes-agent/node_modules/.bin:/home/howis/.nvm/versions/node/v25.2.1/bin:/home/howis/.local/bin:/home/howis/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 Environment="VIRTUAL_ENV=/home/howis/.hermes/hermes-agent/venv"
 Environment="HERMES_HOME=/home/howis/.hermes/profiles/driver-shield-slack"
 Restart=always
 RestartSec=5
-RestartMaxDelaySec=300
-RestartSteps=5
 RestartForceExitStatus=75
 KillMode=mixed
 KillSignal=SIGTERM
@@ -23,4 +22,4 @@ StandardOutput=journal
 StandardError=journal
 
 [Install]
-WantedBy=work.target
+WantedBy=default.target

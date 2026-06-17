@@ -1,0 +1,480 @@
+#!/usr/bin/env python3
+"""Approval-gated scanner for syncing host drift into endeavouros-dotfiles."""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from typing import Iterable
+
+
+REPO = Path(__file__).resolve().parents[2]
+DEFAULT_STATE_DIR = Path(os.environ.get("DOTFILES_AUTOUPDATE_STATE_DIR", "~/.cache/dotfiles-autoupdate")).expanduser()
+UNIT_SUFFIXES = {".service", ".timer", ".target"}
+
+
+def run(cmd: list[str], *, cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(cmd, cwd=str(cwd) if cwd else None, check=check, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+
+def sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def current_head(repo: Path) -> str:
+    return run(["git", "rev-parse", "HEAD"], cwd=repo).stdout.strip()
+
+
+def current_branch(repo: Path) -> str:
+    return run(["git", "branch", "--show-current"], cwd=repo).stdout.strip()
+
+
+def remote_url(repo: Path) -> str:
+    result = run(["git", "remote", "get-url", "origin"], cwd=repo, check=False)
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def git_status_lines(repo: Path) -> list[str]:
+    result = run(["git", "status", "--porcelain=v1", "--untracked-files=normal"], cwd=repo)
+    return [line for line in result.stdout.splitlines() if line.strip()]
+
+
+def status_path(status_line: str) -> str:
+    path = status_line[3:]
+    if " -> " in path:
+        path = path.split(" -> ", 1)[1]
+    return path.strip()
+
+
+def is_ignored_manifest_line(line: str) -> bool:
+    stripped = line.strip()
+    return not stripped or stripped.startswith("#")
+
+
+def read_package_manifest(path: Path) -> set[str]:
+    if not path.exists():
+        return set()
+    return {line.strip() for line in path.read_text().splitlines() if not is_ignored_manifest_line(line)}
+
+
+def explicit_packages(args: list[str]) -> set[str]:
+    result = run(args, check=False)
+    if result.returncode != 0:
+        return set()
+    return set(result.stdout.split())
+
+
+def load_link_entries(repo: Path) -> dict[str, str]:
+    """Parse the simple dotbot link block shape used in install.conf.yaml.
+
+    This intentionally avoids a PyYAML runtime dependency for a cron script.
+    It supports the two forms present in this repo:
+      ~/.zshrc: config/zshrc
+      ~/git/CLAUDE.md:
+        path: config/AGENTS.md
+    """
+
+    config = repo / "install.conf.yaml"
+    links: dict[str, str] = {}
+    if not config.exists():
+        return links
+
+    in_link_block = False
+    pending_dest: str | None = None
+    for raw in config.read_text().splitlines():
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        indent = len(raw) - len(raw.lstrip(" "))
+        stripped = raw.strip()
+
+        if indent == 0 and stripped.startswith("- "):
+            in_link_block = stripped == "- link:"
+            pending_dest = None
+            continue
+
+        if not in_link_block:
+            continue
+
+        if indent == 4 and ":" in stripped:
+            key, value = stripped.split(":", 1)
+            dest = key.strip()
+            value = value.strip()
+            if value:
+                links[dest] = value
+                pending_dest = None
+            else:
+                pending_dest = dest
+            continue
+
+        if pending_dest and indent >= 6 and stripped.startswith("path:"):
+            links[pending_dest] = stripped.split(":", 1)[1].strip()
+            pending_dest = None
+
+    return links
+
+
+def expand_home(path: str, home: Path) -> Path:
+    if path == "~":
+        return home
+    if path.startswith("~/"):
+        return home / path[2:]
+    return Path(path)
+
+
+def scan_dotbot_links(repo: Path, home: Path) -> list[dict[str, str]]:
+    issues: list[dict[str, str]] = []
+    for dest, src in sorted(load_link_entries(repo).items()):
+        dest_path = expand_home(dest, home)
+        expected = (repo / src).resolve(strict=False)
+        if not dest_path.exists() and not dest_path.is_symlink():
+            issues.append({"dest": dest, "src": src, "status": "missing"})
+            continue
+        if not dest_path.is_symlink():
+            issues.append({"dest": dest, "src": src, "status": "not-symlink"})
+            continue
+        actual = dest_path.resolve(strict=False)
+        if actual != expected:
+            issues.append({"dest": dest, "src": src, "status": "mismatched", "actual": str(actual), "expected": str(expected)})
+    return issues
+
+
+def scan_unit_scope(scope: str, repo: Path, repo_dir: Path, live_dir: Path) -> list[dict[str, str]]:
+    drift: list[dict[str, str]] = []
+    if not repo_dir.exists():
+        return drift
+    for repo_file in sorted(repo_dir.iterdir()):
+        if not repo_file.is_file() or repo_file.suffix not in UNIT_SUFFIXES:
+            continue
+        live_file = live_dir / repo_file.name
+        repo_rel = repo_file.relative_to(repo)
+        entry = {
+            "scope": scope,
+            "name": repo_file.name,
+            "repo_path": str(repo_rel),
+            "live_path": str(live_file),
+        }
+        if not live_file.exists():
+            drift.append({**entry, "status": "missing-live", "repo_sha256": sha256_file(repo_file), "live_sha256": ""})
+            continue
+        repo_hash = sha256_file(repo_file)
+        live_hash = sha256_file(live_file)
+        if repo_hash != live_hash:
+            drift.append({**entry, "status": "drift", "repo_sha256": repo_hash, "live_sha256": live_hash})
+    return drift
+
+
+def scan_units(repo: Path, home: Path, system_dir: Path = Path("/etc/systemd/system")) -> list[dict[str, str]]:
+    return [
+        *scan_unit_scope("user", repo, repo / "config/host/systemd/user", home / ".config/systemd/user"),
+        *scan_unit_scope("system", repo, repo / "config/host/systemd/system", system_dir),
+    ]
+
+
+def compare_packages(repo: Path, *, native_explicit: set[str] | None = None, foreign_explicit: set[str] | None = None) -> dict[str, object]:
+    native = native_explicit if native_explicit is not None else explicit_packages(["pacman", "-Qqen"])
+    foreign = foreign_explicit if foreign_explicit is not None else explicit_packages(["pacman", "-Qqem"])
+    repo_native = read_package_manifest(repo / "config/packages-repo.txt") | read_package_manifest(repo / "config/host/packages-host-repo.txt")
+    repo_foreign = read_package_manifest(repo / "config/packages-aur.txt")
+    return {
+        "report_only": True,
+        "extra_native": sorted(native - repo_native),
+        "extra_foreign": sorted(foreign - repo_foreign),
+        "missing_native": sorted(repo_native - native),
+        "missing_foreign": sorted(repo_foreign - foreign),
+    }
+
+
+def package_has_drift(packages: dict[str, object]) -> bool:
+    return any(packages.get(key) for key in ("extra_native", "extra_foreign", "missing_native", "missing_foreign"))
+
+
+def make_request_id(scan_basis: str) -> str:
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    digest = hashlib.sha256(scan_basis.encode()).hexdigest()[:8]
+    return f"{stamp}-{digest}"
+
+
+def build_scan(
+    *,
+    repo: Path = REPO,
+    home: Path = Path.home(),
+    system_dir: Path = Path("/etc/systemd/system"),
+    native_explicit: set[str] | None = None,
+    foreign_explicit: set[str] | None = None,
+) -> dict[str, object]:
+    repo = repo.resolve()
+    status = git_status_lines(repo)
+    units = scan_units(repo, home, system_dir)
+    links = scan_dotbot_links(repo, home)
+    packages = compare_packages(repo, native_explicit=native_explicit, foreign_explicit=foreign_explicit)
+
+    repo_actions = [{"type": "commit_repo_changes", "status": status}] if status else []
+    unit_actions = [
+        {"type": "sync_live_unit", **entry}
+        for entry in units
+        if entry["status"] == "drift"
+    ]
+    actions = [*repo_actions, *unit_actions]
+    actionable = bool(actions or links)
+    scan_basis = "\n".join(status + [json.dumps(item, sort_keys=True) for item in units + links])
+    request_id = make_request_id(scan_basis or current_head(repo))
+
+    return {
+        "id": request_id,
+        "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "repo": str(repo),
+        "branch": current_branch(repo),
+        "head": current_head(repo),
+        "remote": remote_url(repo),
+        "git_status": status,
+        "unit_drift": units,
+        "link_issues": links,
+        "package_drift": packages,
+        "actions": actions,
+        "actionable": actionable,
+    }
+
+
+def bullet_list(items: Iterable[str], *, limit: int = 12) -> list[str]:
+    values = list(items)
+    shown = [f"- {item}" for item in values[:limit]]
+    if len(values) > limit:
+        shown.append(f"- … {len(values) - limit} more")
+    return shown
+
+
+def format_package_section(packages: dict[str, object]) -> list[str]:
+    if not package_has_drift(packages):
+        return []
+    lines = ["", "Package drift is report-only unless explicitly approved/classified:"]
+    labels = [
+        ("native installed but not in manifests", "extra_native"),
+        ("AUR/foreign installed but not in manifest", "extra_foreign"),
+        ("manifest native packages missing locally", "missing_native"),
+        ("manifest AUR packages missing locally", "missing_foreign"),
+    ]
+    for label, key in labels:
+        values = packages.get(key) or []
+        lines.append(f"- {label}: {len(values)}")
+        if values:
+            lines.extend(f"  - {item}" for item in list(values)[:8])
+            if len(values) > 8:
+                lines.append(f"  - … {len(values) - 8} more")
+    return lines
+
+
+def format_discord_message(scan: dict[str, object]) -> str:
+    request_id = str(scan["id"])
+    lines = [f"Dotfiles scan found changes: {request_id}", ""]
+
+    status = scan.get("git_status") or []
+    if status:
+        lines.append("Repo changes:")
+        lines.extend(bullet_list(status))
+        lines.append("")
+
+    units = scan.get("unit_drift") or []
+    if units:
+        lines.append("Copied systemd unit drift:")
+        for entry in units[:12]:
+            lines.append(f"- {entry['status']}: {entry['live_path']} -> {entry['repo_path']}")
+        if len(units) > 12:
+            lines.append(f"- … {len(units) - 12} more")
+        lines.append("")
+
+    links = scan.get("link_issues") or []
+    if links:
+        lines.append("Dotbot link issues (notify-only; apply will not run ./install):")
+        for entry in links[:12]:
+            lines.append(f"- {entry['status']}: {entry['dest']} -> {entry['src']}")
+        if len(links) > 12:
+            lines.append(f"- … {len(links) - 12} more")
+
+    lines.extend(format_package_section(scan.get("package_drift") or {}))
+    lines.extend([
+        "",
+        "Reply in Discord:",
+        f"approve dotfiles {request_id}",
+        f"show dotfiles {request_id}",
+        f"reject dotfiles {request_id}",
+    ])
+    return "\n".join(lines).strip() + "\n"
+
+
+def pending_dir(state_dir: Path = DEFAULT_STATE_DIR) -> Path:
+    return state_dir / "pending"
+
+
+def pending_path(request_id: str, state_dir: Path = DEFAULT_STATE_DIR) -> Path:
+    return pending_dir(state_dir) / f"{request_id}.json"
+
+
+def save_pending(scan: dict[str, object], state_dir: Path = DEFAULT_STATE_DIR) -> Path:
+    path = pending_path(str(scan["id"]), state_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(scan, indent=2, sort_keys=True) + "\n")
+    return path
+
+
+def load_pending(request_id: str, state_dir: Path = DEFAULT_STATE_DIR) -> dict[str, object]:
+    path = pending_path(request_id, state_dir)
+    if not path.exists():
+        raise FileNotFoundError(f"No pending dotfiles request: {request_id}")
+    return json.loads(path.read_text())
+
+
+def current_status_for_paths(repo: Path, planned_status: list[str]) -> tuple[bool, str]:
+    current = git_status_lines(repo)
+    planned_paths = {status_path(line) for line in planned_status}
+    current_for_planned = [line for line in current if status_path(line) in planned_paths]
+    if sorted(current_for_planned) != sorted(planned_status):
+        return False, "Repo status changed since scan; re-run scan before applying."
+    unexpected = [line for line in current if status_path(line) not in planned_paths]
+    if unexpected:
+        return False, "Unexpected repo changes appeared since scan: " + ", ".join(unexpected[:8])
+    return True, ""
+
+
+def validate_repo(repo: Path) -> list[str]:
+    checks: list[str] = []
+    diff_check = run(["git", "diff", "--check"], cwd=repo, check=False)
+    if diff_check.returncode != 0:
+        raise RuntimeError("git diff --check failed:\n" + diff_check.stdout + diff_check.stderr)
+    checks.append("git diff --check")
+
+    script = repo / "config/bin/dotfiles-autoupdate"
+    if script.exists():
+        compile_check = run([sys.executable, "-m", "py_compile", str(script)], check=False)
+        if compile_check.returncode != 0:
+            raise RuntimeError("py_compile failed:\n" + compile_check.stdout + compile_check.stderr)
+        checks.append("python -m py_compile config/bin/dotfiles-autoupdate")
+
+    unit_files = [str(path) for path in (repo / "config/host/systemd/user").glob("*") if path.suffix in UNIT_SUFFIXES]
+    if unit_files and shutil.which("systemd-analyze"):
+        verify = run(["systemd-analyze", "--user", "verify", *unit_files], check=False)
+        if verify.returncode != 0:
+            raise RuntimeError("systemd-analyze --user verify failed:\n" + verify.stdout + verify.stderr)
+        checks.append("systemd-analyze --user verify config/host/systemd/user/*")
+
+    return checks
+
+
+def apply_request(request: dict[str, object], *, repo: Path | None = None, dry_run: bool = False) -> dict[str, object]:
+    repo = (repo or Path(str(request["repo"]))).resolve()
+    if current_head(repo) != request.get("head"):
+        return {"ok": False, "error": "HEAD changed since scan; re-run scan before applying."}
+    if current_branch(repo) != request.get("branch", current_branch(repo)):
+        return {"ok": False, "error": "Branch changed since scan; re-run scan before applying."}
+
+    add_paths: set[str] = set()
+    for action in request.get("actions", []):
+        if action["type"] == "commit_repo_changes":
+            planned_status = list(action.get("status") or [])
+            ok, error = current_status_for_paths(repo, planned_status)
+            if not ok:
+                return {"ok": False, "error": error}
+            add_paths.update(status_path(line) for line in planned_status)
+        elif action["type"] == "sync_live_unit":
+            live = Path(action["live_path"])
+            repo_file = repo / action["repo_path"]
+            if not live.exists():
+                return {"ok": False, "error": f"Live unit disappeared: {live}"}
+            if sha256_file(live) != action.get("live_sha256"):
+                return {"ok": False, "error": f"Live unit changed since scan: {live}"}
+            if not dry_run:
+                repo_file.write_bytes(live.read_bytes())
+            add_paths.add(str(repo_file.relative_to(repo)))
+
+    checks = validate_repo(repo)
+    if dry_run:
+        return {"ok": True, "dry_run": True, "checks": checks, "paths": sorted(add_paths)}
+
+    if not add_paths:
+        return {"ok": False, "error": "No approved paths to apply."}
+
+    run(["git", "add", *sorted(add_paths)], cwd=repo)
+    run(["git", "commit", "-m", "chore: sync dotfiles from host scan"], cwd=repo)
+    push = run(["git", "push", "origin", current_branch(repo)], cwd=repo)
+    return {"ok": True, "checks": checks, "paths": sorted(add_paths), "push": push.stdout.strip(), "commit": current_head(repo)}
+
+
+def command_scan(args: argparse.Namespace) -> int:
+    scan = build_scan(repo=Path(args.repo), home=Path(args.home).expanduser(), system_dir=Path(args.system_dir))
+    if not scan["actionable"]:
+        return 0
+    save_pending(scan, Path(args.state_dir).expanduser())
+    sys.stdout.write(format_discord_message(scan))
+    return 0
+
+
+def command_show(args: argparse.Namespace) -> int:
+    request = load_pending(args.request_id, Path(args.state_dir).expanduser())
+    sys.stdout.write(format_discord_message(request))
+    return 0
+
+
+def command_reject(args: argparse.Namespace) -> int:
+    state_dir = Path(args.state_dir).expanduser()
+    request = load_pending(args.request_id, state_dir)
+    request["status"] = "rejected"
+    rejected = state_dir / "rejected"
+    rejected.mkdir(parents=True, exist_ok=True)
+    (rejected / f"{args.request_id}.json").write_text(json.dumps(request, indent=2, sort_keys=True) + "\n")
+    pending_path(args.request_id, state_dir).unlink()
+    print(f"Rejected dotfiles request {args.request_id}")
+    return 0
+
+
+def command_apply(args: argparse.Namespace) -> int:
+    request = load_pending(args.request_id, Path(args.state_dir).expanduser())
+    result = apply_request(request, dry_run=args.dry_run)
+    if not result["ok"]:
+        print(f"Dotfiles apply failed: {result['error']}", file=sys.stderr)
+        return 1
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--repo", default=str(REPO))
+    parser.add_argument("--home", default=str(Path.home()))
+    parser.add_argument("--system-dir", default="/etc/systemd/system")
+    parser.add_argument("--state-dir", default=str(DEFAULT_STATE_DIR))
+    sub = parser.add_subparsers(dest="command")
+
+    scan = sub.add_parser("scan", help="scan host drift and print a Discord approval request")
+    scan.set_defaults(func=command_scan)
+
+    show = sub.add_parser("show", help="show a pending approval request")
+    show.add_argument("request_id")
+    show.set_defaults(func=command_show)
+
+    reject = sub.add_parser("reject", help="reject a pending approval request")
+    reject.add_argument("request_id")
+    reject.set_defaults(func=command_reject)
+
+    apply = sub.add_parser("apply", help="apply, commit, and push an approved request")
+    apply.add_argument("request_id")
+    apply.add_argument("--dry-run", action="store_true")
+    apply.set_defaults(func=command_apply)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.command is None:
+        args = parser.parse_args([*sys.argv[1:], "scan"])
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

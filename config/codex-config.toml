@@ -1,8 +1,9 @@
 model = "gpt-5.5"
-model_reasoning_effort = "medium"
+model_reasoning_effort = "xhigh"
 approvals_reviewer = "user"
 sandbox_mode = "danger-full-access"
 approval_policy = "never"
+plan_mode_reasoning_effort = "xhigh"
 [projects."/home/howis/git"]
 trust_level = "trusted"
 
@@ -16,6 +17,39 @@ trust_level = "trusted"
 trust_level = "trusted"
 
 [projects."/home/howis/git/endeavouros-dotfiles"]
+trust_level = "trusted"
+
+[projects."/mnt/Main/Pictures/Folders/まほれ/ROMs/CDs/process/tsubasawosapurai"]
+trust_level = "trusted"
+
+[projects."/mnt/Main/Pictures/Folders/まほれ/ROMs/CDs"]
+trust_level = "trusted"
+
+[projects."/home/howis/git/imoto-event-sourcing-agent"]
+trust_level = "trusted"
+
+[projects."/home/howis/git/customer-tracking-portal"]
+trust_level = "trusted"
+
+[projects."/home/howis/git/route-optimisation"]
+trust_level = "trusted"
+
+[projects."/home/howis/git/predictive-maintenance"]
+trust_level = "trusted"
+
+[projects."/home/howis/git/zen-mcp"]
+trust_level = "trusted"
+
+[projects."/home/howis/git/imoto-labs-wiki"]
+trust_level = "trusted"
+
+[projects."/home/howis/git/dat-load-board-explorer"]
+trust_level = "trusted"
+
+[projects."/mnt/Main/AV/fantiadl"]
+trust_level = "trusted"
+
+[projects."/home/howis/git/driver-management-platform"]
 trust_level = "trusted"
 
 [tui]
@@ -35,13 +69,25 @@ trusted_hash = "sha256:3e47564ba7a1bf08ab0f9eda9e25837c299f8f1a3c213d98861ecc4bf
 [hooks.state."/home/howis/.codex/hooks.json:stop:0:0"]
 trusted_hash = "sha256:e936b38e7d8237861544d2b508ebba101d019d1f242c8a577cfeca9961d3518a"
 
+[mcp_servers.chrome-devtools]
+command = "npx"
+args = ["-y", "chrome-devtools-mcp@latest", "--browserUrl=http://127.0.0.1:9222"]
+startup_timeout_sec = 30.0
+tool_timeout_sec = 120.0
+
 [mcp_servers.zen-browser]
 command = "/home/howis/.nvm/versions/node/v25.2.1/bin/node"
 args = ["/home/howis/git/zen-mcp/server.mjs"]
-env = { ZEN_DEBUG_PORT = "9223", ZEN_COMMAND = "/usr/bin/zen-browser", ZEN_LAUNCH_HINT = "ZEN_DEBUG_PORT=9223 /home/howis/git/zen-mcp/launch-zen.sh" }
-enabled = true
-startup_timeout_sec = 10
-tool_timeout_sec = 120
+startup_timeout_sec = 10.0
+tool_timeout_sec = 120.0
+
+[mcp_servers.zen-browser.env]
+ZEN_COMMAND = "/usr/bin/zen-browser"
+ZEN_DEBUG_PORT = "9223"
+ZEN_LAUNCH_HINT = "ZEN_DEBUG_PORT=9223 /home/howis/git/zen-mcp/launch-zen.sh"
+
+[mcp_servers.linear]
+url = "https://mcp.linear.app/mcp"
 
 [plugins."gmail@openai-curated"]
 enabled = true

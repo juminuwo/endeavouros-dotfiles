@@ -26,6 +26,7 @@
     ~/.claude/skills/kanban-sync: config/agent-skills/kanban-sync
     ~/.claude/skills/kitty-codex-agents: config/agent-skills/kitty-codex-agents
     ~/.claude/skills/imoto-one-pagers: config/agent-skills/imoto-one-pagers
+    ~/.claude/skills/dotfiles-autoupdate: config/agent-skills/dotfiles-autoupdate
     ~/.agents/skills/research-first: config/agent-skills/research-first
     ~/.agents/skills/tech-wiki: config/agent-skills/tech-wiki
     ~/.agents/skills/update-projects: config/agent-skills/update-projects
@@ -33,6 +34,7 @@
     ~/.agents/skills/kanban-sync: config/agent-skills/kanban-sync
     ~/.agents/skills/kitty-codex-agents: config/agent-skills/kitty-codex-agents
     ~/.agents/skills/imoto-one-pagers: config/agent-skills/imoto-one-pagers
+    ~/.agents/skills/dotfiles-autoupdate: config/agent-skills/dotfiles-autoupdate
     # Agents — legacy Claude reads markdown (.claude/agents/*.md), Codex reads TOML
     # (.codex/agents/*.toml). Formats differ, so we maintain both. The Codex
     # version is generated from the markdown source and must be regenerated
@@ -60,6 +62,7 @@
     ~/.local/bin/agents-dashboard-spawn: config/bin/agents-dashboard-spawn
     ~/.local/bin/backup-hermes-restic: config/bin/backup-hermes-restic
     ~/.local/bin/hermes-notify-hook: config/bin/hermes-notify-hook
+    ~/.local/bin/dotfiles-autoupdate: config/bin/dotfiles-autoupdate
     ~/.local/bin/project-switch: config/bin/project-switch
     ~/.local/bin/project-status: config/bin/project-status
     ~/.local/bin/services-workflow: config/bin/services-workflow
