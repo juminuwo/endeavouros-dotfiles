@@ -47,6 +47,9 @@ git-filter-repo
 github-cli
 docker
 docker-compose
+cloudflared
+openai-codex
+opencode
 python
 python-pip
 python-pipx
@@ -65,6 +68,7 @@ plocate
 # CLI utilities
 btop
 bluetui
+aria2
 duf
 eza
 fastfetch

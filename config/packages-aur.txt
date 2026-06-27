@@ -4,6 +4,7 @@ cursor-bin
 google-chrome
 nordtray-bin
 nordvpn-bin
+railwayapp-cli
 slack-desktop
 soundwire
 tailscale-systray-git

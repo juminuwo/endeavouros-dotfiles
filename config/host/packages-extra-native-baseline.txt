@@ -1,0 +1,129 @@
+# Explicit native repo packages intentionally not managed by the portable package manifests.
+#
+# Purpose: these packages are installed explicitly on this host as EndeavourOS/bootstrap,
+# rescue, filesystem, printer, or low-level system baseline. The dotfiles scanner ignores
+# them as extra-native drift so daily scans only surface newly explicit packages that need
+# a keep/remove/manifest decision.
+
+# EndeavourOS / desktop baseline
+accountsservice
+arc-gtk-theme-eos
+endeavouros-branding
+endeavouros-keyring
+endeavouros-mirrorlist
+endeavouros-xfce4-terminal-colors
+eos-apps-info
+eos-dracut
+eos-hooks
+eos-lightdm-slick-theme
+eos-log-tool
+eos-packagelist
+eos-qogir-icons
+eos-quickstart
+eos-rankmirrors
+eos-settings-i3wm
+gdm
+libwnck3
+numlockx
+onboard
+welcome
+xf86-input-libinput
+xfce4-terminal
+xterm
+
+# Base OS / shell / docs
+base
+base-devel
+diffutils
+ex-vi-compat
+less
+man-db
+man-pages
+nano
+nano-syntax-highlighting
+perl
+sudo
+texinfo
+which
+xdg-user-dirs
+xdg-utils
+
+# Kernel / boot / firmware / initramfs
+b43-fwcutter
+dracut
+efibootmgr
+efitools
+grub
+linux
+linux-firmware
+linux-headers
+linux-lts
+linux-lts-headers
+os-prober
+sof-firmware
+
+# Storage / filesystem / rescue media
+cabextract
+cdrtools
+chntpw
+cryptsetup
+device-mapper
+dmraid
+dosfstools
+dpkg
+e2fsprogs
+f2fs-tools
+jfsutils
+libgsf
+libopenraw
+lsscsi
+lvm2
+mdadm
+mtools
+nilfs-utils
+ntfs-3g
+sg3_utils
+sysfsutils
+wimlib
+xfsprogs
+
+# Hardware / diagnostics / system utilities
+dmidecode
+ethtool
+haveged
+hdparm
+hwdetect
+hwinfo
+logrotate
+lsb-release
+rebuild-detector
+reflector
+reflector-simple
+resvg
+s-nail
+smartmontools
+upower
+usbutils
+
+# Networking baseline
+bind
+dnsmasq
+inetutils
+iptables
+iwd
+modemmanager
+netctl
+nfs-utils
+nss-mdns
+ntp
+usb_modeswitch
+wpa_supplicant
+xl2tpd
+
+# Printing baseline from EndeavourOS installer
+foomatic-db
+foomatic-db-engine
+foomatic-db-gutenprint-ppds
+foomatic-db-nonfree
+foomatic-db-nonfree-ppds
+foomatic-db-ppds

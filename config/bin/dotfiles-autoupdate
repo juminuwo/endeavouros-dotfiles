@@ -23,6 +23,11 @@ UNIT_SUFFIXES = {".service", ".timer", ".target"}
 REQUEST_ID_RE = re.compile(r"\b\d{8}T\d{6}Z-[0-9a-f]{8}\b")
 APPROVE_RE = re.compile(r"^approve\s+dotfiles\s+(?P<id>\d{8}T\d{6}Z-[0-9a-f]{8})$", re.IGNORECASE)
 DISCORD_INBOUND_RE = re.compile(r"^(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+ .*inbound message: .*platform=discord .*user=isitokaymimi .* msg=(?P<msg>'.*?'|\".*?\") reply_to_id=")
+PACKAGE_NAME_RE = re.compile(r"^[A-Za-z0-9@._+-]+$")
+PACKAGE_ACTION_MANIFESTS = {
+    "extra_native": "config/packages-repo.txt",
+    "extra_foreign": "config/packages-aur.txt",
+}
 
 
 def run(cmd: list[str], *, cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -182,22 +187,94 @@ def scan_units(repo: Path, home: Path, system_dir: Path = Path("/etc/systemd/sys
     ]
 
 
-def compare_packages(repo: Path, *, native_explicit: set[str] | None = None, foreign_explicit: set[str] | None = None) -> dict[str, object]:
-    native = native_explicit if native_explicit is not None else explicit_packages(["pacman", "-Qqen"])
-    foreign = foreign_explicit if foreign_explicit is not None else explicit_packages(["pacman", "-Qqem"])
+def compare_packages(
+    repo: Path,
+    *,
+    native_explicit: set[str] | None = None,
+    foreign_explicit: set[str] | None = None,
+    native_installed: set[str] | None = None,
+    foreign_installed: set[str] | None = None,
+) -> dict[str, object]:
+    native_explicit = native_explicit if native_explicit is not None else explicit_packages(["pacman", "-Qqen"])
+    foreign_explicit = foreign_explicit if foreign_explicit is not None else explicit_packages(["pacman", "-Qqem"])
+    native_installed = native_installed if native_installed is not None else explicit_packages(["pacman", "-Qqn"])
+    foreign_installed = foreign_installed if foreign_installed is not None else explicit_packages(["pacman", "-Qqm"])
     repo_native = read_package_manifest(repo / "config/packages-repo.txt") | read_package_manifest(repo / "config/host/packages-host-repo.txt")
     repo_foreign = read_package_manifest(repo / "config/packages-aur.txt")
+    ignored_extra_native = read_package_manifest(repo / "config/host/packages-extra-native-baseline.txt")
     return {
         "report_only": True,
-        "extra_native": sorted(native - repo_native),
-        "extra_foreign": sorted(foreign - repo_foreign),
-        "missing_native": sorted(repo_native - native),
-        "missing_foreign": sorted(repo_foreign - foreign),
+        "extra_native": sorted(native_explicit - repo_native - ignored_extra_native),
+        "extra_foreign": sorted(foreign_explicit - repo_foreign),
+        "missing_native": sorted(repo_native - native_installed),
+        "missing_foreign": sorted(repo_foreign - foreign_installed),
+        "ignored_extra_native": sorted(native_explicit & ignored_extra_native),
     }
 
 
 def package_has_drift(packages: dict[str, object]) -> bool:
     return any(packages.get(key) for key in ("extra_native", "extra_foreign", "missing_native", "missing_foreign"))
+
+
+def package_actions(packages: dict[str, object]) -> list[dict[str, object]]:
+    actions: list[dict[str, object]] = []
+    extra_native = sorted(str(item) for item in packages.get("extra_native") or [])
+    if extra_native:
+        actions.append({
+            "type": "append_package_manifest",
+            "manifest": PACKAGE_ACTION_MANIFESTS["extra_native"],
+            "packages": extra_native,
+            "source": "extra_native",
+        })
+
+    extra_foreign = sorted(str(item) for item in packages.get("extra_foreign") or [])
+    if extra_foreign:
+        actions.append({
+            "type": "append_package_manifest",
+            "manifest": PACKAGE_ACTION_MANIFESTS["extra_foreign"],
+            "packages": extra_foreign,
+            "source": "extra_foreign",
+            "security_review_required": True,
+        })
+    return actions
+
+
+def request_requires_exact_approval(request: dict[str, object]) -> bool:
+    return any(bool(action.get("security_review_required")) for action in request.get("actions", []))
+
+
+def missing_manifest_packages(path: Path, packages: Iterable[str]) -> list[str]:
+    existing = read_package_manifest(path)
+    missing = {package for package in packages if package not in existing}
+    return sorted(missing)
+
+
+def append_packages_to_manifest(path: Path, packages: Iterable[str]) -> bool:
+    new_packages = missing_manifest_packages(path, packages)
+    if not new_packages:
+        return False
+
+    text = path.read_text() if path.exists() else ""
+    if text and not text.endswith("\n"):
+        text += "\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text + "\n".join(new_packages) + "\n")
+    return True
+
+
+def validate_package_action(action: dict[str, object]) -> tuple[bool, str]:
+    source = str(action.get("source") or "")
+    manifest = str(action.get("manifest") or "")
+    if PACKAGE_ACTION_MANIFESTS.get(source) != manifest:
+        return False, f"Unexpected package manifest action: {manifest}"
+
+    packages = [str(package) for package in action.get("packages") or []]
+    if not packages:
+        return False, "Package manifest action has no packages."
+    invalid = [package for package in packages if not PACKAGE_NAME_RE.match(package)]
+    if invalid:
+        return False, "Invalid package names in approved action: " + ", ".join(invalid[:8])
+    return True, ""
 
 
 def make_request_id(scan_basis: str) -> str:
@@ -213,12 +290,20 @@ def build_scan(
     system_dir: Path = Path("/etc/systemd/system"),
     native_explicit: set[str] | None = None,
     foreign_explicit: set[str] | None = None,
+    native_installed: set[str] | None = None,
+    foreign_installed: set[str] | None = None,
 ) -> dict[str, object]:
     repo = repo.resolve()
     status = git_status_lines(repo)
     units = scan_units(repo, home, system_dir)
     links = scan_dotbot_links(repo, home)
-    packages = compare_packages(repo, native_explicit=native_explicit, foreign_explicit=foreign_explicit)
+    packages = compare_packages(
+        repo,
+        native_explicit=native_explicit,
+        foreign_explicit=foreign_explicit,
+        native_installed=native_installed,
+        foreign_installed=foreign_installed,
+    )
 
     repo_actions = [{"type": "commit_repo_changes", "status": status}] if status else []
     unit_actions = [
@@ -226,9 +311,16 @@ def build_scan(
         for entry in units
         if entry["status"] == "drift"
     ]
-    actions = [*repo_actions, *unit_actions]
-    actionable = bool(actions or links)
-    scan_basis = "\n".join(status + [json.dumps(item, sort_keys=True) for item in units + links])
+    pkg_actions = package_actions(packages)
+    actions = [*repo_actions, *unit_actions, *pkg_actions]
+    actionable = bool(actions or links or package_has_drift(packages))
+    scan_basis_parts = [
+        *status,
+        *[json.dumps(item, sort_keys=True) for item in units + links],
+    ]
+    if package_has_drift(packages):
+        scan_basis_parts.append(json.dumps(packages, sort_keys=True))
+    scan_basis = "\n".join(scan_basis_parts)
     request_id = make_request_id(scan_basis or current_head(repo))
 
     return {
@@ -260,10 +352,10 @@ def format_package_section(packages: dict[str, object]) -> list[str]:
         return []
     lines = ["", "Package drift is report-only unless explicitly approved/classified:"]
     labels = [
-        ("native installed but not in manifests", "extra_native"),
-        ("AUR/foreign installed but not in manifest", "extra_foreign"),
-        ("manifest native packages missing locally", "missing_native"),
-        ("manifest AUR packages missing locally", "missing_foreign"),
+        ("explicit native packages not in manifests", "extra_native"),
+        ("explicit AUR/foreign packages not in manifest", "extra_foreign"),
+        ("manifest native packages not installed", "missing_native"),
+        ("manifest AUR packages not installed", "missing_foreign"),
     ]
     for label, key in labels:
         values = packages.get(key) or []
@@ -272,6 +364,12 @@ def format_package_section(packages: dict[str, object]) -> list[str]:
             lines.extend(f"  - {item}" for item in list(values)[:8])
             if len(values) > 8:
                 lines.append(f"  - … {len(values) - 8} more")
+    if packages.get("extra_foreign"):
+        lines.extend([
+            "",
+            "AUR/foreign package drift is security-sensitive.",
+            "Review upstream package ownership, PKGBUILD, and install scripts before exact approval.",
+        ])
     return lines
 
 
@@ -303,14 +401,18 @@ def format_discord_message(scan: dict[str, object]) -> str:
             lines.append(f"- … {len(links) - 12} more")
 
     lines.extend(format_package_section(scan.get("package_drift") or {}))
-    lines.extend([
-        "",
-        "Reply in Discord:",
-        f"approve dotfiles {request_id}",
-        "Approved  # also works when this is the only pending dotfiles request",
-        f"show dotfiles {request_id}",
-        f"reject dotfiles {request_id}",
-    ])
+    exact_approval_required = request_requires_exact_approval(scan)
+    if exact_approval_required:
+        lines.extend([
+            "",
+            "Exact approval is required because this request includes AUR/foreign package additions.",
+            "Bare Approved will be ignored for this request.",
+        ])
+
+    lines.extend(["", "Reply in Discord:", f"approve dotfiles {request_id}"])
+    if not exact_approval_required:
+        lines.append("Approved  # also works when this is the only pending dotfiles request")
+    lines.extend([f"show dotfiles {request_id}", f"reject dotfiles {request_id}"])
     return "\n".join(lines).strip() + "\n"
 
 
@@ -407,6 +509,8 @@ def find_discord_approval(
 
         if message.lower() in {"approved", "approve"} and len(pending) == 1:
             request_id, request = next(iter(pending.items()))
+            if request_requires_exact_approval(request):
+                continue
             if approved_at >= request_created_local(request):
                 return {"request_id": request_id, "mode": "single-pending-bare-approved", "message": message}
 
@@ -474,6 +578,17 @@ def apply_request(request: dict[str, object], *, repo: Path | None = None, dry_r
             if not dry_run:
                 repo_file.write_bytes(live.read_bytes())
             add_paths.add(str(repo_file.relative_to(repo)))
+        elif action["type"] == "append_package_manifest":
+            ok, error = validate_package_action(action)
+            if not ok:
+                return {"ok": False, "error": error}
+            manifest_path = repo / str(action["manifest"])
+            packages = [str(package) for package in action.get("packages") or []]
+            if dry_run:
+                if missing_manifest_packages(manifest_path, packages):
+                    add_paths.add(str(action["manifest"]))
+            elif append_packages_to_manifest(manifest_path, packages):
+                add_paths.add(str(action["manifest"]))
 
     checks = validate_repo(repo)
     if dry_run:

@@ -10,7 +10,7 @@ Use this skill when the user asks from Discord or CLI to approve, show, or rejec
 - `approve dotfiles <request-id>`
 - `show dotfiles <request-id>`
 - `reject dotfiles <request-id>`
-- bare `Approved` in Discord when exactly one pending request exists; the `dotfiles-autoupdate-approvals` Hermes cron job handles this without relying on the active chat context
+- bare `Approved` in Discord when exactly one pending request exists and the request does not require exact approval; the `dotfiles-autoupdate-approvals` Hermes cron job handles this without relying on the active chat context
 
 ## Repository and command
 
@@ -61,14 +61,17 @@ For `approve dotfiles <request-id>`:
 Hermes also runs `dotfiles-autoupdate approvals` every 5 minutes via a script-only cron job. It reads `~/.hermes/logs/gateway.log` for Discord DM approvals and applies one pending request when either:
 
 - the message is `approve dotfiles <request-id>`, or
-- the message is bare `Approved` / `approve` and exactly one pending dotfiles request exists.
+- the message is bare `Approved` / `approve`, exactly one pending dotfiles request exists, and the request does not contain an exact-approval-only action.
+
+AUR/foreign package manifest additions are exact-approval-only because they require a security review of package ownership, PKGBUILD, and install scripts. Bare `Approved` is ignored for those requests.
 
 Because cron deliveries are not mirrored into the active Discord gateway session, do not assume a plain `Approved` message will have the scan summary in LLM context. The approval monitor is the durable path for that case.
 
 ## Safety rules
 
 - Apply only the request id the user approved.
-- Do not auto-classify package drift. Package drift is report-only unless the user gives explicit package additions/removals.
+- Package-only drift can create a request. Extra native packages may be approved into `config/packages-repo.txt`; extra AUR/foreign packages may be approved into `config/packages-aur.txt` only with exact `approve dotfiles <request-id>` approval.
+- Missing package drift is notify-only. Do not install missing packages from this flow.
 - Do not run `./install` or `./host-install` automatically after approval. Mention them as follow-up only if needed.
 - If the command reports that HEAD, branch, live unit hashes, or repo status changed since scan, stop and ask for a fresh scan.
 - Deliver summaries in the same Discord DM/channel where the approval came from unless the user says otherwise.

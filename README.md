@@ -111,9 +111,16 @@ The scanner tracks high-confidence drift only:
 - repo working-tree changes such as `config/codex-config.toml`
 - copied host systemd unit drift between `config/host/systemd/` and the live unit locations
 - dotbot link health from `install.conf.yaml`
-- package drift between package manifests and explicit live installs, reported only
+- package drift between package manifests and live installs. Extra-package drift is
+  based on explicitly installed packages; missing-package drift is based on whether
+  manifest packages are installed at all, including dependencies.
 
-Package drift is report-only unless explicitly classified and approved. The apply step refuses to continue if the repo branch, HEAD, live unit hashes, or working-tree state changed after the scan. `approve dotfiles <id>` is preferred, but a bare `Approved` also works when exactly one pending dotfiles request exists.
+Native packages that are intentionally explicit on this host but should not be
+portable install targets live in `config/host/packages-extra-native-baseline.txt`.
+This keeps EndeavourOS/bootstrap packages out of daily drift alerts while still
+surfacing newly explicit native packages that need a keep/remove decision.
+
+Package drift creates a notification even when it is the only drift. Extra native packages can be approved into `config/packages-repo.txt`; extra AUR/foreign packages can be approved into `config/packages-aur.txt` only with exact `approve dotfiles <id>` approval after reviewing package ownership, PKGBUILD, and install scripts. Missing packages remain report-only and are not installed by the scanner. The apply step refuses to continue if the repo branch, HEAD, live unit hashes, or working-tree state changed after the scan. `approve dotfiles <id>` is preferred; a bare `Approved` also works when exactly one pending dotfiles request exists, except for requests containing AUR/foreign package additions.
 
 ## Repo layout
 
