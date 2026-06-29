@@ -84,7 +84,6 @@ vhs
 yazi
 yt-dlp
 zoxide
-glow
 imagemagick
 wget
 pkgfile

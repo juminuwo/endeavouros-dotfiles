@@ -2,6 +2,7 @@
 caffeine-ng
 cursor-bin
 google-chrome
+leaf-markdown-viewer-bin
 nordtray-bin
 nordvpn-bin
 railwayapp-cli
