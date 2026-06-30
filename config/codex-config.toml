@@ -91,3 +91,9 @@ url = "https://mcp.linear.app/mcp"
 
 [plugins."gmail@openai-curated"]
 enabled = true
+
+[notice]
+hide_rate_limit_model_nudge = true
+
+[notice.model_migrations]
+"gpt-5.4" = "gpt-5.5"
