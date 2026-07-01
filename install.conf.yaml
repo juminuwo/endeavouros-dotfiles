@@ -9,6 +9,7 @@
     ~/.config/nvim: config/nvim
     ~/.zshrc: config/zshrc
     ~/.config/i3: config/i3
+    ~/.config/flameshot/flameshot.ini: config/flameshot/flameshot.ini
     ~/.xprofile: config/xprofile
     ~/.Xmodmap: config/Xmodmap
     ~/.config/kitty/kitty.conf: config/kitty.conf
