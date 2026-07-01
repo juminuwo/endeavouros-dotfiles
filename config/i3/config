@@ -431,9 +431,6 @@ exec_always --no-startup-id sh -c 'pgrep -x clipmenud >/dev/null || clipmenud'
 # i3-resurrect auto run for all workspaces and programs
 exec --no-startup-id ~/.local/bin/restore_i3_session.sh
 
-# nordtray startup
-exec --no-startup-id /usr/lib/nordtray/nordtray
-
 #get auth work with polkit-gnome
 exec --no-startup-id /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1
 
@@ -503,7 +500,6 @@ exec --no-startup-id /usr/bin/dunst
 #exec --no-startup-id sleep 2 && xfce4-terminal
 #exec --no-startup-id sleep 7 && firefox https://github.com/endeavouros-team/endeavouros-i3wm-setup/blob/main/force-knowledge.md
 #exec --no-startup-id sleep 3 && thunar
-exec --no-startup-id tailscale-systray
 # caffeine-ng auto-starts via /etc/xdg/autostart/caffeine.desktop
 #exec --no-startup-id caffeine
 exec --no-startup-id fcitx5 -d

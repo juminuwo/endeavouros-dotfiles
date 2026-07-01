@@ -3,11 +3,9 @@ caffeine-ng
 cursor-bin
 google-chrome
 leaf-markdown-viewer-bin
-nordtray-bin
 nordvpn-bin
 railwayapp-cli
 slack-desktop
 soundwire
-tailscale-systray-git
 xmousepasteblock
 zen-browser-bin
