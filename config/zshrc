@@ -142,6 +142,23 @@ export BUN_INSTALL="$HOME/.local/share/reflex/bun"
 export PATH="$BUN_INSTALL/bin:$PATH"
 eval "$(zoxide init zsh)"
 
+# Launch Codex with a Kitty user var so Kitty can suppress accidental Ctrl+C exits.
+codex() {
+    if [[ -z "${KITTY_WINDOW_ID:-}" ]]; then
+        command codex "$@"
+        return
+    fi
+
+    printf '\033]1337;SetUserVar=codex_no_ctrl_c=MQ==\007'
+    {
+        command codex "$@"
+    } always {
+        local status=$?
+        printf '\033]1337;SetUserVar=codex_no_ctrl_c\007'
+        return "$status"
+    }
+}
+
 # Launch Claude Code with tab title set to current directory
 cc() {
     local dir_name="${PWD##*/}"
