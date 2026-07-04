@@ -95,6 +95,7 @@ WantedBy=default.target
 ## Scheduled dotfiles autoupdate
 
 `config/bin/dotfiles-autoupdate` is the approval-gated scanner for keeping this repo aligned with the live machine. Hermes runs the scanner daily at 19:00 and delivers output only to the Discord DM target `discord:isitokaymimi`. A second Hermes cron job checks that DM every 5 minutes for approval replies and applies the pending request without relying on the active chat context.
+The scanner stays silent when the only drift is the volatile Fcitx profile at `config/fcitx5/profile`.
 
 Commands:
 

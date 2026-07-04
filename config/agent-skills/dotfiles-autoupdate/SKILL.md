@@ -71,6 +71,7 @@ Because cron deliveries are not mirrored into the active Discord gateway session
 
 - Apply only the request id the user approved.
 - Package-only drift can create a request. Extra native packages may be approved into `config/packages-repo.txt`; extra AUR/foreign packages may be approved into `config/packages-aur.txt` only with exact `approve dotfiles <request-id>` approval.
+- `config/fcitx5/profile` is volatile; the scan job intentionally stays silent and creates no pending request when it is the only drift.
 - Missing package drift is notify-only. Do not install missing packages from this flow.
 - Do not run `./install` or `./host-install` automatically after approval. Mention them as follow-up only if needed.
 - If the command reports that HEAD, branch, live unit hashes, or repo status changed since scan, stop and ask for a fresh scan.

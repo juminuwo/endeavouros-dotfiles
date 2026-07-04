@@ -28,6 +28,9 @@ PACKAGE_ACTION_MANIFESTS = {
     "extra_native": "config/packages-repo.txt",
     "extra_foreign": "config/packages-aur.txt",
 }
+SILENT_ONLY_REPO_STATUS_PATHS = {
+    "config/fcitx5/profile",
+}
 
 
 def run(cmd: list[str], *, cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -214,6 +217,20 @@ def compare_packages(
 
 def package_has_drift(packages: dict[str, object]) -> bool:
     return any(packages.get(key) for key in ("extra_native", "extra_foreign", "missing_native", "missing_foreign"))
+
+
+def scan_is_silent_only_repo_status(scan: dict[str, object]) -> bool:
+    """Return True for volatile repo-only changes that should not notify."""
+
+    status = [str(line) for line in scan.get("git_status") or []]
+    packages = scan.get("package_drift") or {}
+    return (
+        bool(status)
+        and all(status_path(line) in SILENT_ONLY_REPO_STATUS_PATHS for line in status)
+        and not scan.get("unit_drift")
+        and not scan.get("link_issues")
+        and not package_has_drift(packages)
+    )
 
 
 def package_actions(packages: dict[str, object]) -> list[dict[str, object]]:
@@ -605,7 +622,7 @@ def apply_request(request: dict[str, object], *, repo: Path | None = None, dry_r
 
 def command_scan(args: argparse.Namespace) -> int:
     scan = build_scan(repo=Path(args.repo), home=Path(args.home).expanduser(), system_dir=Path(args.system_dir))
-    if not scan["actionable"]:
+    if not scan["actionable"] or scan_is_silent_only_repo_status(scan):
         return 0
     save_pending(scan, Path(args.state_dir).expanduser())
     sys.stdout.write(format_discord_message(scan))

@@ -7,6 +7,7 @@ import subprocess
 import sys
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
+from types import SimpleNamespace
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "config/bin/dotfiles-autoupdate"
@@ -302,6 +303,72 @@ def test_scan_creates_discord_message_for_codex_config_and_report_only_packages(
     assert "approve dotfiles " in message
     assert "Package drift is report-only" in message
     assert "extra-native" in message
+
+
+def test_scan_identifies_fcitx_profile_as_silent_only_repo_status():
+    mod = load_module()
+
+    assert mod.scan_is_silent_only_repo_status({
+        "git_status": [" M config/fcitx5/profile"],
+        "unit_drift": [],
+        "link_issues": [],
+        "package_drift": {
+            "extra_native": [],
+            "extra_foreign": [],
+            "missing_native": [],
+            "missing_foreign": [],
+        },
+    }) is True
+
+    assert mod.scan_is_silent_only_repo_status({
+        "git_status": [" M config/fcitx5/profile", " M config/codex-config.toml"],
+        "unit_drift": [],
+        "link_issues": [],
+        "package_drift": {
+            "extra_native": [],
+            "extra_foreign": [],
+            "missing_native": [],
+            "missing_foreign": [],
+        },
+    }) is False
+
+    assert mod.scan_is_silent_only_repo_status({
+        "git_status": [" M config/fcitx5/profile"],
+        "unit_drift": [],
+        "link_issues": [],
+        "package_drift": {
+            "extra_native": ["new-package"],
+            "extra_foreign": [],
+            "missing_native": [],
+            "missing_foreign": [],
+        },
+    }) is False
+
+
+def test_command_scan_does_not_save_or_notify_for_fcitx_profile_only(tmp_path, monkeypatch, capsys):
+    mod = load_module()
+    scan = {
+        "actionable": True,
+        "git_status": [" M config/fcitx5/profile"],
+        "unit_drift": [],
+        "link_issues": [],
+        "package_drift": {
+            "extra_native": [],
+            "extra_foreign": [],
+            "missing_native": [],
+            "missing_foreign": [],
+        },
+    }
+    monkeypatch.setattr(mod, "build_scan", lambda **kwargs: scan)
+
+    def fail_save_pending(*args, **kwargs):
+        raise AssertionError("silent-only scan should not create a pending request")
+
+    monkeypatch.setattr(mod, "save_pending", fail_save_pending)
+    args = SimpleNamespace(repo="repo", home="home", system_dir="system", state_dir=str(tmp_path / "state"))
+
+    assert mod.command_scan(args) == 0
+    assert capsys.readouterr().out == ""
 
 
 def test_apply_request_refuses_head_mismatch(tmp_path):
