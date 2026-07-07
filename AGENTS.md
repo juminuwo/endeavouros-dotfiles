@@ -30,6 +30,7 @@ This repo is the source of truth for system config (i3, Kitty, zsh, Hermes, Code
 - After editing an i3blocks block script (`config/bin/i3blocks-*`), signal i3blocks to re-run the block: `pkill -RTMIN+<N> i3blocks` where `<N>` matches the block's `signal=` line in `config/i3/i3blocks.conf`. Without this, the bar shows cached output until its `interval` ticks.
 - **Workspaces 6 and 7 are reserved for project-switch** (kitty pairs managed via i3 marks + workspace renames). Nothing else should spawn windows there — including i3-resurrect, scratchpad rules, or `for_window` placements. Adding such a rule collides with project-switch's mark/rename state and silently breaks project switching.
 - Don't hand-write files into `~` when a dotbot-managed equivalent exists — edit the source under `config/` instead.
+- Before recommending Git/version-control for `~/.hermes`, check `hermes-restic-backup.timer` and `config/bin/backup-hermes-restic`: live Hermes state is already backed up daily via encrypted restic to `rclone:Gdrive_howismypielola:HermesRestic`. Commit only declarative/rebuildable pieces such as shared skills and scripts under `config/agent-skills/`; do not propose Git-tracking all of `~/.hermes`.
 
 ## Shared agent skills
 

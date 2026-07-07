@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # Back up Hermes state and canonical agent skills to an encrypted restic repo.
+# This is the canonical backup path for ~/.hermes; do not separately
+# Git-track the full directory. Commit only declarative/rebuildable Hermes
+# pieces such as shared skills/scripts under config/agent-skills/.
 #
 # First-time setup on a new machine:
 #   mkdir -p ~/.config/restic

@@ -54,6 +54,49 @@ Installs the systemd units that **can't** be symlinked because they need to live
 
 After install, timers and service groups are reloaded and enabled. The Hermes restic timer is only enabled when `~/.config/restic/hermes-password` exists. Re-run `./host-install` whenever you edit the unit files in `config/host/systemd/`.
 
+## Hermes state and backups
+
+Do **not** Git-track the full `~/.hermes` directory. It contains live state,
+sessions, credentials, gateway routing data, caches, and SQLite databases.
+Only declarative/rebuildable Hermes pieces belong in this repo, such as shared
+skills and helper scripts under `config/agent-skills/`.
+
+Live Hermes state is backed up by the systemd user timer
+`hermes-restic-backup.timer`, installed from
+`config/host/systemd/user/hermes-restic-backup.timer`. The timer runs
+`~/.local/bin/backup-hermes-restic`, sourced from
+`config/bin/backup-hermes-restic`, and writes encrypted restic snapshots to:
+
+```text
+rclone:Gdrive_howismypielola:HermesRestic
+```
+
+The backup includes:
+
+- `~/.hermes`
+- `~/git/endeavouros-dotfiles/config/agent-skills`
+
+Intentional excludes keep large/regenerable or noisy paths out of the backup:
+
+- `~/.hermes/hermes-agent`
+- `~/.hermes/logs`
+- `~/.hermes/audio_cache`
+- `~/.hermes/checkpoints`
+- `~/.hermes/state-snapshots`
+
+Retention is `7` daily, `4` weekly, and `6` monthly snapshots with prune.
+The password file is `~/.config/restic/hermes-password`; store it in a
+password manager, because the cloud backup is unrecoverable without it.
+
+Useful checks:
+
+```bash
+systemctl --user status hermes-restic-backup.timer --no-pager
+systemctl --user status hermes-restic-backup.service --no-pager
+journalctl --user -u hermes-restic-backup.service -n 80 --no-pager
+backup-hermes-restic
+```
+
 ## User service workflow
 
 User services are grouped by intent:
