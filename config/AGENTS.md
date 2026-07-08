@@ -21,6 +21,9 @@ This file is the canonical `AGENTS.md` for the user's `~/git/` tree and is symli
 - Python projects use `uv` with `.venv` in the project directory
 - Shared personal agent skills live in `~/git/endeavouros-dotfiles/config/agent-skills/`. Codex/Claude use symlinks; Hermes reads the directory via `skills.external_dirs`.
 
+## Frontend and UI Design
+For frontend or UI work, read the repo root `DESIGN.md` when present before making visual changes. If a UI repo lacks one and the task requires design decisions, use the shared convention in `~/git/docs/design-workflow.md` and starter template at `~/git/docs/templates/DESIGN.md`.
+
 ## Machine Services
 Personal system config lives in `~/git/endeavouros-dotfiles`. User services are grouped as `default.target` (personal always-on), `work.target` (work/project daemons, enabled automatically on MAIN), and `timers.target` (scheduled jobs). Use `services-workflow audit`, `services-workflow work status`, and `systemctl --user list-dependencies work.target`. Do not hand-edit `~/.config/systemd/user` when a repo-managed unit exists; edit `config/host/systemd/user/` in the dotfiles repo and run `./host-install`.
 
