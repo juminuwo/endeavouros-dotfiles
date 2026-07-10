@@ -1,9 +1,12 @@
 [Unit]
 Description=rclone pCloud mount
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=notify
 ExecStartPre=/bin/mkdir -p %h/pcloud
+ExecStartPre=/bin/sh -c 'until getent hosts api.pcloud.com >/dev/null 2>&1; do sleep 1; done'
 ExecStart=/usr/bin/rclone mount pcloud: %h/pcloud \
     --vfs-cache-mode full \
     --vfs-cache-max-age 24h \
