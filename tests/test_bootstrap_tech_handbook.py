@@ -14,6 +14,19 @@ SCRIPT = (
 EXPECTED_ORIGIN = "https://github.com/Imoto-Labs/tech-handbook.git"
 
 
+def write_fake_installer(path: Path) -> None:
+    installer = path / "install"
+    installer.write_text(
+        """#!/bin/sh
+set -eu
+if [ -n "${FAKE_INSTALL_MARKER:-}" ]; then
+  : > "$FAKE_INSTALL_MARKER"
+fi
+"""
+    )
+    installer.chmod(0o755)
+
+
 def init_checkout(path: Path, origin: str = EXPECTED_ORIGIN) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "init", "-q", str(path)], check=True)
@@ -21,6 +34,7 @@ def init_checkout(path: Path, origin: str = EXPECTED_ORIGIN) -> None:
         ["git", "-C", str(path), "remote", "add", "origin", origin],
         check=True,
     )
+    write_fake_installer(path)
 
 
 def make_fake_gh(path: Path) -> Path:
@@ -35,6 +49,8 @@ fi
 if [ "${1:-}" = repo ] && [ "${2:-}" = clone ]; then
   git init -q "$4"
   git -C "$4" remote add origin https://github.com/Imoto-Labs/tech-handbook.git
+  printf '#!/bin/sh\nset -eu\n: > "$FAKE_INSTALL_MARKER"\n' > "$4/install"
+  chmod +x "$4/install"
   exit 0
 fi
 exit 64
@@ -64,6 +80,7 @@ def run_bootstrap(
             "LEGACY_DOCS_LINK": str(legacy_link),
             "DOTFILES_AGENT_DOCS_DIR": str(old_docs),
             "FAKE_GH_AUTH_STATUS": str(auth_status),
+            "FAKE_INSTALL_MARKER": str(tmp_path / "install-ran"),
         }
     )
     result = subprocess.run(
@@ -100,6 +117,7 @@ def test_clones_missing_checkout_and_removes_owned_legacy_link(tmp_path: Path) -
     assert returned_link == legacy_link
     assert not legacy_link.exists()
     assert not legacy_link.is_symlink()
+    assert (tmp_path / "install-ran").is_file()
 
 
 def test_existing_checkout_is_not_pulled_and_unrelated_link_is_preserved(
@@ -145,3 +163,14 @@ def test_requires_authenticated_github_cli_for_clone(tmp_path: Path) -> None:
     assert result.returncode != 0
     assert "gh auth login" in result.stderr
     assert not destination.exists()
+
+
+def test_rejects_checkout_without_handbook_installer(tmp_path: Path) -> None:
+    destination = tmp_path / "git" / "tech-handbook"
+    init_checkout(destination)
+    (destination / "install").unlink()
+
+    result, _, _ = run_bootstrap(tmp_path)
+
+    assert result.returncode != 0
+    assert "install is missing or not executable" in result.stderr

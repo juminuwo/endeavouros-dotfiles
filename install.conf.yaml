@@ -21,6 +21,9 @@
     ~/.claude/keybindings.json: config/claude-keybindings.json
     ~/.codex/config.toml: config/codex-config.toml
     ~/.codex/hooks.json: config/codex-hooks.json
+    ~/.codex/AGENTS.md:
+      path: config/AGENTS.md
+      relink: true
     # Skills: Codex and legacy Claude Code get per-skill symlinks; Hermes reads the
     # same canonical source dir via skills.external_dirs configured below.
     ~/.claude/skills/research-first: config/agent-skills/research-first

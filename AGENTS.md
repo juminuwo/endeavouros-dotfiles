@@ -41,5 +41,5 @@ This repo is the source of truth for system config (i3, Kitty, zsh, Hermes, Code
 
 ## AGENTS.md and CLAUDE.md compatibility
 
-- **`config/AGENTS.md`** — symlinked to both `~/git/AGENTS.md` and `~/git/CLAUDE.md` so Hermes/Codex and Claude-compatible agents inherit the same cross-project context. Keep it lean; cross-project content only.
+- **`config/AGENTS.md`** — symlinked to `~/.codex/AGENTS.md`, `~/git/AGENTS.md`, and `~/git/CLAUDE.md`. Codex uses the first as its real global guidance; the workspace links provide compatibility but do not cross child Git-root discovery boundaries. Keep it lean and cross-project only.
 - **`AGENTS.md`** (this file) — only loaded when cwd is inside this repo. Dotfiles-specific guidance goes here.

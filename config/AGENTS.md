@@ -1,6 +1,6 @@
 # Cross-Project Context
 
-This file is the canonical `AGENTS.md` for the user's `~/git/` tree and is symlinked from `~/git/AGENTS.md` and `~/git/CLAUDE.md`. Every project under `~/git/` inherits it. Keep content here strictly to things useful in *every* project — project-specific guidance belongs in that project's own `AGENTS.md`.
+This file is the canonical personal agent guidance and is symlinked from `~/.codex/AGENTS.md`, `~/git/AGENTS.md`, and `~/git/CLAUDE.md`. Codex loads the first path globally. The `~/git` links remain useful when that directory is the workspace root and for agent compatibility, but child Git repositories do not inherit them automatically. Keep content here strictly to things useful in every project; project-specific guidance belongs in that project's own `AGENTS.md`.
 
 ## OS & Environment
 - **OS:** EndeavourOS (Arch-based, rolling release)
