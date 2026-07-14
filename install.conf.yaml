@@ -3,6 +3,9 @@
       relink: true
       create: true
 
+- shell:
+  - [config/bin/bootstrap-tech-handbook, Ensuring Imoto Labs tech handbook checkout]
+
 - clean: ['~']
 
 - link:
@@ -53,7 +56,6 @@
     ~/git/CLAUDE.md:
       path: config/AGENTS.md
       relink: true
-    ~/git/docs: config/agent-docs
     ~/bin/clip-img: config/clip-img
     ~/bin/claude-notify: config/claude-alerts/claude-notify
     ~/Documents/online-personal/_slides-assets/rose-pine.css: config/slides-themes/rose-pine.css

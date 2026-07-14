@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+readonly REPOSITORY="Imoto-Labs/tech-handbook"
+readonly DESTINATION="${TECH_HANDBOOK_DIR:-$HOME/git/tech-handbook}"
+readonly LEGACY_LINK="${LEGACY_DOCS_LINK:-$HOME/git/docs}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
+readonly DOTFILES_ROOT="$(realpath -m -- "$SCRIPT_DIR/../..")"
+readonly LEGACY_TARGET="${DOTFILES_AGENT_DOCS_DIR:-$DOTFILES_ROOT/config/agent-docs}"
+
+die() {
+  printf 'bootstrap-tech-handbook: %s\n' "$*" >&2
+  exit 1
+}
+
+origin_is_expected() {
+  local origin="${1%.git}"
+  origin="${origin%/}"
+
+  case "$origin" in
+    https://github.com/Imoto-Labs/tech-handbook | \
+      git@github.com:Imoto-Labs/tech-handbook | \
+      ssh://git@github.com/Imoto-Labs/tech-handbook)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+verify_checkout() {
+  git -C "$DESTINATION" rev-parse --git-dir >/dev/null 2>&1 ||
+    die "$DESTINATION exists but is not a Git checkout"
+
+  local origin
+  origin="$(git -C "$DESTINATION" remote get-url origin 2>/dev/null)" ||
+    die "$DESTINATION has no origin remote"
+  origin_is_expected "$origin" ||
+    die "$DESTINATION origin is '$origin', expected GitHub repository $REPOSITORY"
+}
+
+remove_legacy_link() {
+  [[ -L "$LEGACY_LINK" ]] || return 0
+
+  local raw_target resolved_target expected_target
+  raw_target="$(readlink -- "$LEGACY_LINK")"
+  if [[ "$raw_target" = /* ]]; then
+    resolved_target="$(realpath -m -- "$raw_target")"
+  else
+    resolved_target="$(realpath -m -- "$(dirname -- "$LEGACY_LINK")/$raw_target")"
+  fi
+  expected_target="$(realpath -m -- "$LEGACY_TARGET")"
+
+  if [[ "$resolved_target" == "$expected_target" ]]; then
+    rm -- "$LEGACY_LINK"
+    printf 'Removed legacy handbook link %s\n' "$LEGACY_LINK"
+  else
+    printf 'Preserving unrelated symlink %s -> %s\n' "$LEGACY_LINK" "$raw_target" >&2
+  fi
+}
+
+if [[ -e "$DESTINATION" || -L "$DESTINATION" ]]; then
+  verify_checkout
+else
+  command -v gh >/dev/null 2>&1 ||
+    die "GitHub CLI is required to clone $REPOSITORY"
+  gh auth status --hostname github.com >/dev/null 2>&1 ||
+    die "authenticate GitHub CLI with 'gh auth login' before installing"
+
+  mkdir -p -- "$(dirname -- "$DESTINATION")"
+  gh repo clone "$REPOSITORY" "$DESTINATION"
+  verify_checkout
+fi
+
+remove_legacy_link
