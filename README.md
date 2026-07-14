@@ -9,8 +9,9 @@ git clone --recursive https://github.com/<you>/endeavouros-dotfiles ~/git/endeav
 cd ~/git/endeavouros-dotfiles
 
 ./install-packages    # 1. install pacman + AUR packages (uses yay)
-./install             # 2. dotbot — symlink configs and ~/bin/*, ~/.local/bin/* scripts
-./host-install        # 3. install systemd units (asks for sudo once)
+gh auth login         # 2. required once for private Imoto Labs repositories
+./install             # 3. clone shared handbook and symlink local config
+./host-install        # 4. install systemd units (asks for sudo once)
 ```
 
 Each step is idempotent. Re-run any of them after edits.
@@ -23,7 +24,9 @@ Reads `config/packages-repo.txt` and `config/packages-aur.txt` and installs ever
 
 ### `./install` (dotbot)
 
-Driven by `install.conf.yaml`. Creates symlinks from `~` into `config/`, replacing any existing files at the destination (`relink: true`). Categories:
+Driven by `install.conf.yaml`. It first ensures the private Imoto Labs engineering handbook exists at `~/git/tech-handbook`, cloning it with GitHub CLI when absent. Existing checkouts are never pulled or modified. A path collision or checkout with the wrong origin stops installation instead of overwriting local data.
+
+Dotbot then creates symlinks from `~` into `config/`, replacing any existing files at the destination (`relink: true`). Categories:
 
 | What | Destination |
 |---|---|
@@ -33,9 +36,15 @@ Driven by `install.conf.yaml`. Creates symlinks from `~` into `config/`, replaci
 | Hermes/Codex/Claude agent config | `~/.codex/{config.toml,hooks.json,agents/*}`, `~/.agents/skills/*`, `~/.claude/{settings.json,keybindings.json,skills/*}`; Hermes reads `config/agent-skills/` via `skills.external_dirs` |
 | User scripts in PATH | `~/bin/{clip-img,claude-notify}`, `~/.local/bin/{agents-dashboard,agents-dashboard-spawn,restore_i3_session,save_i3_session,soundwire-tray,backup-hermes-restic,hermes-notify-hook,dotfiles-autoupdate,services-workflow}` |
 | User systemd units | `~/.config/systemd/user/mmo-mouse-workspaces.service`; host install also copies host-specific user units such as `hermes-restic-backup.{service,timer}` |
-| Top-level repo agent context | `~/git/AGENTS.md`, `~/git/CLAUDE.md` |
+| Personal/global agent context | `~/.codex/AGENTS.md`, `~/git/AGENTS.md`, `~/git/CLAUDE.md` |
+| Shared Imoto Labs engineering guidance | `~/git/tech-handbook` plus its user-scoped setup skill |
 
-After symlinking, dotbot runs `git submodule update --init --recursive` to keep `dotbot/` itself current, then configures Hermes to read shared skills from `~/git/endeavouros-dotfiles/config/agent-skills` when `hermes` is installed.
+The handbook bootstrap invokes its idempotent installer, which exposes the
+team-owned `setup-imoto-project` skill at
+`~/.agents/skills/setup-imoto-project`. After symlinking, dotbot runs
+`git submodule update --init --recursive` to keep `dotbot/` itself current, then
+configures Hermes to read shared personal skills from
+`~/git/endeavouros-dotfiles/config/agent-skills` when `hermes` is installed.
 
 ### `./host-install`
 

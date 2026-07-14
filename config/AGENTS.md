@@ -1,6 +1,6 @@
 # Cross-Project Context
 
-This file is the canonical `AGENTS.md` for the user's `~/git/` tree and is symlinked from `~/git/AGENTS.md` and `~/git/CLAUDE.md`. Every project under `~/git/` inherits it. Keep content here strictly to things useful in *every* project — project-specific guidance belongs in that project's own `AGENTS.md`.
+This file is the canonical personal agent guidance and is symlinked from `~/.codex/AGENTS.md`, `~/git/AGENTS.md`, and `~/git/CLAUDE.md`. Codex loads the first path globally. The `~/git` links remain useful when that directory is the workspace root and for agent compatibility, but child Git repositories do not inherit them automatically. Keep content here strictly to things useful in every project; project-specific guidance belongs in that project's own `AGENTS.md`.
 
 ## OS & Environment
 - **OS:** EndeavourOS (Arch-based, rolling release)
@@ -19,10 +19,11 @@ This file is the canonical `AGENTS.md` for the user's `~/git/` tree and is symli
 - Git repos live in `~/git/`
 - Each project can have its own `AGENTS.md` and/or `CLAUDE.md` for project-specific commands and structure
 - Python projects use `uv` with `.venv` in the project directory
+- Shared Imoto Labs engineering guidance lives in `~/git/tech-handbook/`
 - Shared personal agent skills live in `~/git/endeavouros-dotfiles/config/agent-skills/`. Codex/Claude use symlinks; Hermes reads the directory via `skills.external_dirs`.
 
 ## Frontend and UI Design
-For frontend or UI work, read the repo root `DESIGN.md` when present before making visual changes. If a UI repo lacks one and the task requires design decisions, use the shared convention in `~/git/docs/design-workflow.md` and starter template at `~/git/docs/templates/DESIGN.md`.
+For frontend or UI work, read the repo root `DESIGN.md` when present before making visual changes. If a UI repo lacks one and the task requires design decisions, use the shared convention in `~/git/tech-handbook/standards/design-system.md` and starter template at `~/git/tech-handbook/templates/DESIGN.md`.
 
 ## Machine Services
 Personal system config lives in `~/git/endeavouros-dotfiles`. User services are grouped as `default.target` (personal always-on), `work.target` (work/project daemons, enabled automatically on MAIN), and `timers.target` (scheduled jobs). Use `services-workflow audit`, `services-workflow work status`, and `systemctl --user list-dependencies work.target`. Do not hand-edit `~/.config/systemd/user` when a repo-managed unit exists; edit `config/host/systemd/user/` in the dotfiles repo and run `./host-install`.
@@ -34,7 +35,7 @@ The vault lives at `~/Documents/online-personal/`. For any vault-related task, t
 The portfolio kanban for Imoto Labs work lives at `~/Documents/online-personal/Imoto Labs/Kanban.md`. For read-only planning questions ("what's next?", "what should I work on?", "what's in flight?"), use the `kanban-planner` agent. Use the `kanban-sync` skill only for syncing from commit trailers or composing commits that update the board.
 
 ## Linear Work
-Linear is execution tracking, not the durable decision log. When the user asks for Linear Project, Milestone, or Issue work, or names a Linear issue as the active task, follow the shared convention in `~/git/docs/linear-workflow.md` and the repo overlay at `docs/technical/linear-workflow.md` when present.
+Linear is execution tracking, not the durable decision log. When the user asks for Linear Project, Milestone, or Issue work, or names a Linear issue as the active task, follow the shared convention in `~/git/tech-handbook/standards/linear-workflow.md` and the repo overlay at `docs/technical/linear-workflow.md` when present.
 
 ## Imoto Labs positioning
 Imoto Labs is positioned as a **3PL technology company** between carriers and shippers, building customer-fit technology solutions — not a carrier that happens to have tech. Treat the old "5 core products" framing as POC/capability-demo context, not current strategy. Check the vault/kanban for current customer status before making claims.
