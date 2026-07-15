@@ -20,7 +20,7 @@ Build polished, claim-safe Imoto Labs one-page PDFs from product messaging docs 
 1. **Ground the product and claims.** Read the messaging doc, existing one-pager drafts, and current artifacts. Identify forbidden claims and proof-boundary language before writing.
 2. **Draft copy first.** Create or update the markdown one-pager for headline, subhead, problem, value cards, first engagement, best fit, proof boundary, and CTA.
 3. **Select visuals.** Prefer current product/demo screenshots, dashboard graphs, route maps, evidence screens, or clean technical diagrams. Crop away app chrome, text fragments, and irrelevant UI when they weaken the page.
-4. **Design in HTML/CSS.** Use A4 portrait by default, large readable type, varied layouts across products, and technology-forward visuals. Use `assets/one-pager.css` and one of the templates in `assets/templates/` as a starting point.
+4. **Design in HTML/CSS.** Use A4 portrait by default, large readable type, varied layouts across products, and technology-forward visuals. Use `assets/one-pager.css` and one of the templates in `assets/templates/` as a starting point. When moving a template into `Artifacts/`, copy the stylesheet beside it and change the stylesheet link from `../one-pager.css` to `one-pager.css`.
 5. **Export and validate.** Render preview PNG and PDF with the helper script. Check the PDF at actual size, verify one-page A4 output, and scan extracted text for pricing/secrets patterns.
 6. **Update artifact navigation.** Keep `Artifacts/Artifacts.md` and `One-Pagers.md` current when adding new generated assets.
 

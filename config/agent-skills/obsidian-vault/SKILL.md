@@ -16,7 +16,7 @@ The user's Obsidian vault lives outside `~/git/`, so its CLAUDE.md files do **no
 online-personal/
 ├── Imoto Labs/             # Company knowledge base (published to Quartz wiki)
 ├── Personal/               # Personal notes
-│   └── Projects/           # Project ideas and planning
+├── Projects/               # Project ideas and planning
 ├── Resources/
 │   └── Technologies/       # Tech wiki entries (managed by tech-wiki skill)
 └── …
@@ -89,7 +89,7 @@ To change Quartz behaviour (e.g. add a folder to `ignorePatterns`), edit `~/git/
 ## Personal vault
 
 - **Personal notes:** `~/Documents/online-personal/Personal/`
-- **Project ideas / planning:** `~/Documents/online-personal/Personal/Projects/`
+- **Project ideas / planning:** `~/Documents/online-personal/Projects/`
 
 These are private — never publish or expose externally. Lighter conventions than Imoto Labs; follow whatever pattern already exists in the target subdirectory.
 

@@ -1,8 +1,6 @@
 ---
 name: kitty-codex-agents
 description: Use when spawning, monitoring, or coordinating Codex agents in kitty tabs with live user visibility and Hermes remote control. Prefer this over tmux for interactive spawned-agent workflows on Adrian's machine.
-version: 1.0.0
-author: Hermes Agent
 license: MIT
 metadata:
   hermes:
@@ -134,13 +132,13 @@ Notes:
 Use this when the task is known up front but the user still wants live visibility:
 
 ```bash
-kitty @ launch --type=tab --tab-title '<agent-name>' --var hermes_agent=<agent-name> --cwd <repo-path> --hold zsh -lc 'exec codex exec --full-auto "$TASK"'
+kitty @ launch --type=tab --tab-title '<agent-name>' --var hermes_agent=<agent-name> --cwd <repo-path> --hold /usr/bin/codex exec --sandbox workspace-write '<prompt>'
 ```
 
 For short prompts, direct quoting is fine:
 
 ```bash
-kitty @ launch --type=tab --tab-title codex-auth --var hermes_agent=codex-auth --cwd /home/howis/git/my-project --hold zsh -lc 'exec codex exec --full-auto "Fix the auth bug, run tests, and summarize the diff"'
+kitty @ launch --type=tab --tab-title codex-auth --var hermes_agent=codex-auth --cwd /home/howis/git/my-project --hold /usr/bin/codex exec --sandbox workspace-write 'Fix the auth bug, run tests, and summarize the diff'
 ```
 
 For complex prompts, avoid giant shell one-liners. Prefer writing the prompt to a temporary file and launching a small wrapper command that reads it:
@@ -148,7 +146,7 @@ For complex prompts, avoid giant shell one-liners. Prefer writing the prompt to 
 ```bash
 prompt_file=$(mktemp)
 printf '%s\n' 'Fix the auth bug, run tests, and summarize the diff.' > "$prompt_file"
-kitty @ launch --type=tab --tab-title codex-auth --var hermes_agent=codex-auth --cwd /home/howis/git/my-project --hold zsh -lc "exec codex exec --full-auto \"$(cat "$prompt_file")\""
+kitty @ launch --type=tab --tab-title codex-auth --var hermes_agent=codex-auth --cwd /home/howis/git/my-project --env PROMPT_FILE="$prompt_file" --hold zsh -lc 'exec /usr/bin/codex exec --sandbox workspace-write - < "$PROMPT_FILE"'
 ```
 
 If quoting becomes fragile, create a short script file and launch the script instead of embedding the whole task in the `kitty @ launch` command.

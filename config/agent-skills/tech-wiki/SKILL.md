@@ -1,7 +1,6 @@
 ---
 name: tech-wiki
 description: Research a technology from a URL and create a wiki entry in the Obsidian Technologies directory. Use when adding a new technology to the personal knowledge base.
-argument-hint: <url> [technology name]
 allowed-tools: [Read, Write, Edit, Glob, Grep, Bash, WebFetch, WebSearch, Agent]
 ---
 
@@ -15,20 +14,16 @@ Research a technology from a provided URL and create a structured wiki entry in 
 - `/tech-wiki https://github.com/org/repo FastAPI` — research with explicit name
 - `/tech-wiki https://arxiv.org/abs/... Mamba` — works with papers, docs, repos, landing pages
 
-## Arguments
+## Input
 
-The user invoked this command with: $ARGUMENTS
-
-Parse the arguments:
-- First argument: URL to fetch (required)
-- Remaining arguments: technology name (optional — infer from page content if not provided)
+Use the URL supplied in the user's request. Treat any accompanying technology name as an explicit name; otherwise infer it from the source.
 
 If no URL is provided, ask the user for one.
 
 ## Configuration
 
 - **Technologies directory**: `/home/howis/Documents/online-personal/Resources/Technologies/`
-- **Index file**: `/home/howis/Documents/online-personal/Resources/Technologies/_index.md`
+- **Index file**: `/home/howis/Documents/online-personal/Resources/Technologies/Technologies.md`
 
 ## Workflow
 
@@ -62,7 +57,7 @@ If an entry already exists for this technology, read it and update it rather tha
 
 Figure out:
 
-- **category**: Which section of the index does this belong in? Look at the existing categories in `_index.md` (3D Reconstruction, Computer Vision, Dev Tools, Infrastructure, Other). Use an existing category if it fits, or create a new one if needed.
+- **category**: Which section of the index does this belong in? Look at the existing categories in `Technologies.md` (3D Reconstruction, Computer Vision, Dev Tools, Infrastructure, Other). Use an existing category if it fits, or create a new one if needed.
 - **status**: Default to `watching` for new entries (we're researching it, not using it yet). If the user specifies otherwise, honour that.
 - **projects**: Leave as empty list `[]` unless the user mentions a specific project connection.
 - **filename**: Use the technology's proper name as the filename (e.g., `FastAPI.md`, `3D Gaussian Splatting.md`). Match the capitalisation and spacing the project itself uses.
@@ -109,7 +104,7 @@ Format as markdown links, not bare URLs.}
 
 ### Step 6: Update the Index
 
-Read the current `_index.md` and add the new entry to the appropriate category table. Follow the existing format:
+Read the current `Technologies.md` and add the new entry to the appropriate category table. Follow the existing format:
 
 ```
 | [[{Name}]] | {status} | {one-line relevance description} |

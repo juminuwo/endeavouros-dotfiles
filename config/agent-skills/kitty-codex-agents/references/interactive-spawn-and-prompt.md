@@ -42,6 +42,6 @@ kitty @ close-window --match 'var:hermes_agent=codex-tests-interactive'
 Pitfalls:
 
 - Do not interpret "spawn Codex" as `codex exec` unless the user asks for a one-shot/non-interactive run.
-- `codex exec --full-auto` is deprecated in Codex CLI 0.131.0; for one-shot tasks use current sandbox flags, but interactive TUI spawning should just launch `/usr/bin/codex`.
+- For one-shot tasks, use `codex exec --sandbox workspace-write`; interactive TUI spawning should just launch `/usr/bin/codex`.
 - Include `/home/howis/.local/bin` in PATH for spawned Codex tabs so repo tools like `uv` are available to commands Codex runs.
 - Match by `--var hermes_agent=...`, never by tab title.
