@@ -32,7 +32,7 @@ Personal system config lives in `~/git/endeavouros-dotfiles`. User services are 
 The vault lives at `~/Documents/online-personal/`. For any vault-related task, the `obsidian-vault` skill loads the full structure, conventions, and publishing flow on trigger — don't duplicate vault content here.
 
 ## Imoto Labs Kanban (planning surface)
-The portfolio kanban for Imoto Labs work lives at `~/Documents/online-personal/Imoto Labs/Kanban.md`. For read-only planning questions ("what's next?", "what should I work on?", "what's in flight?"), use the `kanban-planner` agent. Use the `kanban-sync` skill only for syncing from commit trailers or composing commits that update the board.
+The portfolio kanban for Imoto Labs work lives at `~/Documents/online-personal/Imoto Labs/Kanban.md`. For read-only planning questions ("what's next?", "what should I work on?", "what's in flight?"), use the `kanban-planner` agent.
 
 ## Linear Work
 Linear is execution tracking, not the durable decision log. When the user asks for Linear Project, Milestone, or Issue work, or names a Linear issue as the active task, follow the shared convention in `~/git/tech-handbook/standards/linear-workflow.md` and the repo overlay at `docs/technical/linear-workflow.md` when present.

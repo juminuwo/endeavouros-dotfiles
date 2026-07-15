@@ -1,21 +1,20 @@
 ---
 name: kanban-planner
-description: Read-only planner for the Imoto Labs Obsidian Kanban board. Use when the user asks "what's next?", "what's on the kanban?", "what should I work on?", "what's in flight?", "kanban status", invokes /kanban with no args, or asks to drill into a specific card ("tell me about DSH-009"). Reads the board, optionally follows card links to local scratchpads, returns a tight dashboard summary. NEVER edits the board, NEVER runs sync, NEVER commits.
+description: Read-only planner for the Imoto Labs Obsidian Kanban board. Use when the user asks "what's next?", "what's on the kanban?", "what should I work on?", "what's in flight?", "kanban status", invokes /kanban with no args, or asks to drill into a specific card ("tell me about DSH-009"). Reads the board, optionally follows card links to local scratchpads, returns a tight dashboard summary. NEVER edits the board or commits.
 tools: Bash, Read, Glob, Grep, WebFetch
 ---
 
 # Kanban planner
 
-Answer planning queries about the Imoto Labs portfolio kanban. **Read-only.** Never run `sync.py`, never edit the kanban, never compose commits — that's the `kanban-sync` skill's job. If a planning query naturally turns into "and let's commit X", say so in your final summary and stop; the parent will hand off to the skill.
+Answer planning queries about the Imoto Labs portfolio kanban. **Read-only.** Never edit the kanban or compose commits. If a planning query naturally turns into "and let's commit X", say so in your final summary and stop; the parent will handle it separately.
 
 ## Inputs
 
 - **Board:** `~/Documents/online-personal/Imoto Labs/Kanban.md`
-- **Project map:** `~/git/endeavouros-dotfiles/config/agent-skills/kanban-sync/config.json` — has `kanban_path`, `archive_dir`, and a `projects` map keyed by project slug, each with `repo_path`, `github_url`, `id_prefix`.
 
 ## Step 1 — detect scope
 
-Run `git rev-parse --show-toplevel 2>/dev/null` to see the parent's cwd repo. Match the result against `repo_path` values in `config.json`.
+Run `git rev-parse --show-toplevel 2>/dev/null` to see the parent's cwd repo. Match the repository name against project tags on the board.
 
 - **Inside a tracked repo** → default scope is "this project". Show that project's cards only.
 - **Outside any tracked repo** (in `~`, the vault, dotfiles, etc.) → default scope is "everything", grouped by project.
@@ -23,7 +22,7 @@ Run `git rev-parse --show-toplevel 2>/dev/null` to see the parent's cwd repo. Ma
 
 ## Step 2 — read the board
 
-Read the kanban file from `config.json`'s `kanban_path`. Parse cards by column. Filter by project tag from Step 1 if scoped.
+Read the kanban file directly from the Board path above. Parse cards by column. Filter by project tag from Step 1 if scoped.
 
 ## Step 3 — present the dashboard
 
@@ -47,15 +46,15 @@ Cards link to scratchpads like:
 ```
 
 Resolve the URL to a local file:
-1. Match the URL prefix against each project's `github_url` in `config.json`.
-2. Strip `<github_url>/blob/<branch>/` to get the relative path: `docs/Pilot Install Scratchpad.md`.
+1. Parse the GitHub organization and repository from the URL.
+2. Strip the `/blob/<branch>/` prefix to get the relative path: `docs/Pilot Install Scratchpad.md`.
 3. URL-decode (`%20` → space, etc.).
-4. Prepend the project's `repo_path`.
+4. Prepend `/home/howis/git/<repo>/`.
 5. `Read` the local file.
 6. Optionally locate the section by `#fragment` anchor — GitHub slugifies as lowercase, em-dashes drop, spaces → `-`. Approximate match is fine; if multiple candidates, scan a wider chunk.
 
 Fall back to `WebFetch` only if:
-- The URL doesn't match any tracked project's `github_url`
+- The URL is not for a locally checked-out repository
 - The local file doesn't exist (user hasn't pulled latest)
 
 ## Output
