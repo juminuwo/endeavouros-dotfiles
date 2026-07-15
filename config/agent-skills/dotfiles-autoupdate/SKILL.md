@@ -68,7 +68,7 @@ The snapshot is only eligible for an approval message received after the scan. E
 
 - Apply only the current snapshot shown by the scan.
 - Package-only drift can create a snapshot. Extra native packages may be approved into `config/packages-repo.txt`; extra AUR/foreign packages may be approved into `config/packages-aur.txt`.
-- `config/fcitx5/profile` is volatile; the scan job intentionally stays silent and creates no snapshot when it is the only drift.
+- `config/codex-config.toml` and `config/fcitx5/profile` are machine state; the scan job intentionally stays silent and creates no snapshot when either or both are the only drift.
 - Missing package drift is notify-only. Do not install missing packages from this flow.
 - Do not run `./install` or `./host-install` automatically after approval. Mention them as follow-up only if needed.
 - If the command reports that HEAD, branch, live unit hashes, or repo status changed since scan, stop and ask for a fresh scan. Apply only from `main`; a successful apply commits, pushes directly to `origin/main`, and verifies the local repo is clean.

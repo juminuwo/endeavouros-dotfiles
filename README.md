@@ -147,7 +147,7 @@ WantedBy=default.target
 ## Scheduled dotfiles autoupdate
 
 `config/bin/dotfiles-autoupdate` is the approval-gated scanner for keeping this repo aligned with the live machine. Hermes runs the scanner daily at 19:00 and delivers drift only to the Discord DM `discord:1506284995818553374`. A second Hermes cron job checks that DM every 5 minutes for an approval reply and applies the current snapshot without relying on the active chat context. There is no request queue: each scan replaces the previous snapshot.
-The scanner stays silent when the only drift is the volatile Fcitx profile at `config/fcitx5/profile`.
+The scanner stays silent when the only drift is one or both machine-state files: `config/codex-config.toml` and `config/fcitx5/profile`.
 
 Commands:
 
@@ -161,7 +161,7 @@ dotfiles-autoupdate approvals     # check Discord gateway history for approval r
 
 The scanner tracks high-confidence drift only:
 
-- repo working-tree changes such as `config/codex-config.toml`
+- repo working-tree changes, excluding the machine-state-only Codex and Fcitx files above
 - copied host systemd unit drift between `config/host/systemd/` and the live unit locations
 - dotbot link health from `install.conf.yaml`
 - package drift between package manifests and live installs. Extra-package drift is

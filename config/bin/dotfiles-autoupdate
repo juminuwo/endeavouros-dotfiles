@@ -28,6 +28,7 @@ PACKAGE_ACTION_MANIFESTS = {
     "extra_foreign": "config/packages-aur.txt",
 }
 SILENT_ONLY_REPO_STATUS_PATHS = {
+    "config/codex-config.toml",
     "config/fcitx5/profile",
 }
 

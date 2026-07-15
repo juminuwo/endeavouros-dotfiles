@@ -304,11 +304,10 @@ def test_scan_creates_discord_message_for_codex_config_and_report_only_packages(
     assert "extra-native" in message
 
 
-def test_scan_identifies_fcitx_profile_as_silent_only_repo_status():
+def test_scan_identifies_machine_state_files_as_silent_only_repo_status():
     mod = load_module()
 
-    assert mod.scan_is_silent_only_repo_status({
-        "git_status": [" M config/fcitx5/profile"],
+    silent_scan = {
         "unit_drift": [],
         "link_issues": [],
         "package_drift": {
@@ -317,24 +316,18 @@ def test_scan_identifies_fcitx_profile_as_silent_only_repo_status():
             "missing_native": [],
             "missing_foreign": [],
         },
-    }) is True
+    }
+
+    for status in (
+        [" M config/fcitx5/profile"],
+        [" M config/codex-config.toml"],
+        [" M config/fcitx5/profile", " M config/codex-config.toml"],
+    ):
+        assert mod.scan_is_silent_only_repo_status({**silent_scan, "git_status": status}) is True
 
     assert mod.scan_is_silent_only_repo_status({
-        "git_status": [" M config/fcitx5/profile", " M config/codex-config.toml"],
-        "unit_drift": [],
-        "link_issues": [],
-        "package_drift": {
-            "extra_native": [],
-            "extra_foreign": [],
-            "missing_native": [],
-            "missing_foreign": [],
-        },
-    }) is False
-
-    assert mod.scan_is_silent_only_repo_status({
+        **silent_scan,
         "git_status": [" M config/fcitx5/profile"],
-        "unit_drift": [],
-        "link_issues": [],
         "package_drift": {
             "extra_native": ["new-package"],
             "extra_foreign": [],
@@ -344,11 +337,11 @@ def test_scan_identifies_fcitx_profile_as_silent_only_repo_status():
     }) is False
 
 
-def test_command_scan_does_not_save_or_notify_for_fcitx_profile_only(tmp_path, monkeypatch, capsys):
+def test_command_scan_does_not_save_or_notify_for_machine_state_only(tmp_path, monkeypatch, capsys):
     mod = load_module()
     scan = {
         "actionable": True,
-        "git_status": [" M config/fcitx5/profile"],
+        "git_status": [" M config/fcitx5/profile", " M config/codex-config.toml"],
         "unit_drift": [],
         "link_issues": [],
         "package_drift": {
@@ -361,7 +354,7 @@ def test_command_scan_does_not_save_or_notify_for_fcitx_profile_only(tmp_path, m
     monkeypatch.setattr(mod, "build_scan", lambda **kwargs: scan)
 
     def fail_save_pending(*args, **kwargs):
-        raise AssertionError("silent-only scan should not create a pending request")
+        raise AssertionError("silent-only scan should not create a pending snapshot")
 
     monkeypatch.setattr(mod, "save_pending", fail_save_pending)
     args = SimpleNamespace(repo="repo", home="home", system_dir="system", state_dir=str(tmp_path / "state"))
