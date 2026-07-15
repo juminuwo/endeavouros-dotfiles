@@ -17,7 +17,10 @@
    - Use up-to-date product screenshots when available.
    - Generate demo graph/map visuals only when they reflect existing capability.
    - Crop visuals to the informative area; remove browser/app headers and text fragments that do not help the buyer.
-5. Build an HTML source in `Artifacts/` from the skill template and shared CSS.
+5. Build an HTML source in `Artifacts/` from the skill template and shared CSS:
+   - Bundled templates use `../one-pager.css` so they render correctly in place under `assets/templates/`.
+   - Copy the selected template and `assets/one-pager.css` into `Artifacts/`.
+   - In the copied HTML, change the stylesheet link to `one-pager.css` so it resolves beside the artifact.
 6. Render a preview PNG and PDF with `scripts/imoto_onepager.py render`.
 7. Inspect the preview and PDF render for:
    - one-page fit

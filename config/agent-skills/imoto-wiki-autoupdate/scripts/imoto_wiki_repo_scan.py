@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Scan local Imoto-Labs git repos for wiki auto-update context.
 
-Default mode is cron pre-run mode: print one JSON payload and write a
-last-scan snapshot. If nothing needs the LLM, print {"wakeAgent": false}
-as the final line so Hermes cron skips the agent.
+Default mode prints one JSON payload and writes a last-scan snapshot. If
+nothing needs the LLM, it prints {"wakeAgent": false} as the final line.
 
 After a successful wiki update, run with --mark-reported to move current heads
 into the durable reported state.

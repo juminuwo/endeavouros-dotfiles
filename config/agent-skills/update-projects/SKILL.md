@@ -6,7 +6,7 @@ allowed-tools: Bash,Read,Write,Edit
 
 # Update Git Projects Dashboard
 
-This skill scans all git repositories in `~/git/` and updates the Obsidian projects dashboard at `~/Documents/online-personal/Personal/Projects/Git Projects.md`.
+This skill scans all git repositories in `~/git/` and updates the Obsidian projects dashboard at `~/Documents/online-personal/Projects/Git Projects.md`.
 
 ## When to Use This Skill
 
@@ -27,7 +27,8 @@ Run the following to get status of all repos:
 for dir in /home/howis/git/*/; do
   if [ -d "$dir/.git" ]; then
     name=$(basename "$dir")
-    last_commit=$(git -C "$dir" log --oneline -1 2>/dev/null || echo "No commits")
+    last_commit=$(git -C "$dir" log -1 --format='%h %s' 2>/dev/null || echo "No commits")
+    last_commit_date=$(git -C "$dir" log -1 --format='%cI' 2>/dev/null || true)
     branch=$(git -C "$dir" branch --show-current 2>/dev/null)
 
     # Check for uncommitted changes
@@ -38,6 +39,7 @@ for dir in /home/howis/git/*/; do
     echo "PROJECT: $name"
     echo "BRANCH: $branch"
     echo "LAST_COMMIT: $last_commit"
+    echo "LAST_COMMIT_DATE: $last_commit_date"
     echo "STAGED: $staged"
     echo "UNSTAGED: $unstaged"
     echo "UNTRACKED: $untracked"
@@ -46,45 +48,27 @@ for dir in /home/howis/git/*/; do
 done
 ```
 
-### Step 2: Categorize Projects
-
-Use this categorization (adjust based on what you find):
-
-**Work - Customer Portal:**
-- customer-tracking-portal
-- predictive-maintenance (related to customer-tracking-portal)
-- route-optimisation (related to customer-tracking-portal)
-
-**Work - Finance / DD:**
-- andre_tryee_finances
-- scmt_finances
-- financial-dd-skill
-
-**Personal / Hobby:**
-- personal_keyboard
-- advent-of-code-2025
-- dog-instagram-poster
-- endeavouros-dotfiles
-- linux-utils
-- badminton-computer-vision
-
-**Forks / Checkouts:**
-- cvat
-- InstaPy
-- qmk_firmware
-- tapestry-skills-for-claude-code
-- data
-
-### Step 3: Read Current Dashboard
+### Step 2: Read Current Dashboard
 
 ```bash
-cat "/home/howis/Documents/online-personal/Personal/Projects/Git Projects.md"
+cat "/home/howis/Documents/online-personal/Projects/Git Projects.md"
 ```
+
+### Step 3: Categorize Projects
+
+Build categories from current evidence instead of a hardcoded repository list:
+
+1. Preserve the existing dashboard category for repositories already listed unless their purpose clearly changed.
+2. For a new repository, inspect its remote and the first useful section of its `README.md` or project manifest.
+3. Put external upstream checkouts and forks under `Forks / Checkouts`.
+4. Add clearly owned repositories to the most specific existing work or personal category supported by their documentation.
+5. Put uncertain repositories under `Uncategorised` and report them; do not guess from the repository name alone.
+6. Remove entries that no longer have a checkout only when the dashboard is intended to track current local repositories; otherwise mark them missing.
 
 ### Step 4: Update the Dashboard
 
 Use the Edit tool to update the Obsidian file at:
-`/home/howis/Documents/online-personal/Personal/Projects/Git Projects.md`
+`/home/howis/Documents/online-personal/Projects/Git Projects.md`
 
 Update these sections:
 1. **Project tables** - Update status and notes based on recent commits
@@ -112,20 +96,15 @@ Quick overview of all projects in `~/git/`
 
 ## Active Projects
 
-### Work - Customer Portal
-| Project | Status | Notes |
-|---------|--------|-------|
-| [[customer-tracking-portal]] | Active/Paused/Maintenance | Brief note |
-| [[predictive-maintenance]] | Active/Paused/Maintenance | Brief note |
-| [[route-optimisation]] | Active/Paused/Maintenance | Brief note |
-
-### Work - Finance / DD
+### Existing category name
 | Project | Status | Notes |
 |---------|--------|-------|
 | [[project-name]] | Active/Paused/Maintenance | Brief note |
 
-### Personal / Hobby
-[... personal projects ...]
+### Uncategorised
+| Project | Status | Notes |
+|---------|--------|-------|
+| [[new-project]] | Active/Paused/Maintenance | Needs categorisation |
 
 ---
 

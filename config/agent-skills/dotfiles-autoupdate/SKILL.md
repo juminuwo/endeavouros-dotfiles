@@ -1,6 +1,6 @@
 ---
 name: dotfiles-autoupdate
-description: Handle Discord approval replies for the EndeavourOS dotfiles scheduled host scan. Use when the user says approve/show/reject dotfiles <id>.
+description: Handle Discord approval replies for the EndeavourOS dotfiles scheduled host scan. Use when the user says approve, show, or reject dotfiles with a request ID.
 ---
 
 # Dotfiles Autoupdate Approval Flow

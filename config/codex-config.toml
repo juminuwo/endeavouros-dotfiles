@@ -1,5 +1,5 @@
-model = "gpt-5.5"
-model_reasoning_effort = "xhigh"
+model = "gpt-5.6-sol"
+model_reasoning_effort = "high"
 approvals_reviewer = "user"
 sandbox_mode = "danger-full-access"
 approval_policy = "never"
@@ -59,6 +59,7 @@ status_line_use_colors = true
 
 [tui.model_availability_nux]
 "gpt-5.5" = 4
+"gpt-5.6-sol" = 4
 
 [hooks.state]
 
@@ -88,6 +89,9 @@ ZEN_LAUNCH_HINT = "ZEN_DEBUG_PORT=9223 /home/howis/git/zen-mcp/launch-zen.sh"
 
 [mcp_servers.linear]
 url = "https://mcp.linear.app/mcp"
+
+[mcp_servers.openaiDeveloperDocs]
+url = "https://developers.openai.com/mcp"
 
 [plugins."gmail@openai-curated"]
 enabled = true

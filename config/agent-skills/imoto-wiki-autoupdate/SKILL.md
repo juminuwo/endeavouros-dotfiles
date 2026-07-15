@@ -1,7 +1,7 @@
 ---
 name: imoto-wiki-autoupdate
 description: Weekly Imoto Labs repo-to-Obsidian wiki updater. Use when a cron job or user wants to scan ~/git for GitHub Imoto-Labs repositories and update bounded project-page activity blocks without hallucinating product claims.
-allowed-tools: Bash, Read, Write, Edit, Glob, Grep
+allowed-tools: Bash, Read, Write, Edit, Glob, Grep, MCP
 ---
 
 # Imoto Wiki Autoupdate
@@ -19,7 +19,6 @@ Paths:
 - Project pages: `/home/howis/Documents/online-personal/Imoto Labs/Projects`
 - Project index: `/home/howis/Documents/online-personal/Imoto Labs/Projects/Projects.md`
 - Canonical scanner script: `/home/howis/git/endeavouros-dotfiles/config/agent-skills/imoto-wiki-autoupdate/scripts/imoto_wiki_repo_scan.py`
-- Hermes runtime scanner symlink: `/home/howis/.hermes/scripts/imoto_wiki_repo_scan.py`
 - Scanner state: `/home/howis/.hermes/state/imoto-wiki-autoupdate.json`
 
 Auto-include repos when any remote URL matches one of:
@@ -51,30 +50,36 @@ Do not rewrite human-authored summary, Status, ICP, messaging, Strategy, Release
 
 1. Run the scanner script:
    ```bash
-   python3 /home/howis/.hermes/scripts/imoto_wiki_repo_scan.py
+   python3 /home/howis/git/endeavouros-dotfiles/config/agent-skills/imoto-wiki-autoupdate/scripts/imoto_wiki_repo_scan.py
    ```
    Completion criterion: stdout contains JSON with `repos`, `unmapped_repos`, `changed_repos`, and either wakes the agent or ends with `{"wakeAgent": false}`.
 
-2. If the scanner output ends with `{"wakeAgent": false}`, stop. No wiki update is needed.
+2. If the scanner output ends with `{"wakeAgent": false}`, stop unless the current cron job explicitly requires a Linear activity review. For that weekly Linear-enabled job, continue with the read-only Linear review, but do not edit a project page unless a changed repo or a confidently mapped Linear item warrants an auto-block update.
 
-3. For each `changed_repos[]` entry with `wiki_page` set:
+3. For each `changed_repos[]` entry with a `wiki_page` set:
    - Read the target wiki page.
    - Read only source files identified by the scanner as safe and useful: `README.md`, docs indexes, `package.json`, `pyproject.toml`, and commit metadata. Do not read credentials or local sensitive storage.
    - Create or replace only the auto-managed block.
    - Mention the update window, branch, latest commit, notable commits, dirty/uncommitted state, and source files reviewed.
    - Treat uncommitted local changes as local-only and not shipped.
 
-4. For `unmapped_repos[]`:
+4. When the Linear MCP server is available, review activity from the preceding seven days using read-only Linear queries. Query only issue, project, document, and project/initiative status-update metadata. Do not create, update, comment on, or otherwise mutate Linear.
+   - Associate a Linear item with a project page only through an exact repo-title alias or an explicit project/repo link already present in the page or allowed repo docs.
+   - Add a `### Linear Activity (past 7 days)` subsection inside the existing auto-managed block only when there is a clear association. Include concise, factual issue/project/document titles and their state or update timestamp.
+   - If an item cannot be associated confidently, include it in the cron summary as "unmapped Linear activity" rather than guessing or creating a page.
+   - Linear is execution tracking, not a source of durable product positioning. Never use Linear activity to alter human-authored Status, positioning, strategy, customer claims, or deployment claims.
+
+5. For `unmapped_repos[]`:
    - Do not invent a full project page by default.
    - Add them only to the cron summary as "unmapped Imoto-Labs repos" with repo path, remote, latest commit, and suggested title.
    - If the user explicitly approves auto-creation later, create minimal `type: project`, `status: draft` or `needs_rewrite` pages and add them to a "Discovered Repos" section rather than making product claims.
 
-5. Patch `Projects/Projects.md` only when:
+6. Patch `Projects/Projects.md` only when:
    - A new project page is explicitly created, or
    - An existing row has a clearly stale deployment/status value grounded in repo docs.
    Otherwise leave the index untouched.
 
-6. Verify:
+7. Verify:
    - Every modified page still has frontmatter with `type:` and `status:`.
    - Every auto block has exactly one START and one END marker.
    - No file under `Credentials/` or `/mnt/Main/Project Storage/` was read or copied.
@@ -97,6 +102,11 @@ _Last checked: YYYY-MM-DD HH:MM TZ. Source: `/home/howis/git/example` on branch 
 - Local state: clean / local uncommitted changes present; not treated as shipped.
 - Sources reviewed: `README.md`, `docs/README.md`, `package.json`.
 
+### Linear Activity (past 7 days)
+
+- `IMO-123` — issue title — In Progress (updated YYYY-MM-DD).
+- Project/status update: title or project name — factual update timestamp.
+
 Notes:
 - Keep this section factual. Update human-authored status/positioning manually when needed.
 <!-- AUTO:IMOTO-WIKI-END -->
@@ -112,6 +122,7 @@ Allowed sources:
 - Repo docs: `README.md`, `docs/README.md`, other docs indexes explicitly linked from README/indexes.
 - Project manifests: `package.json`, `pyproject.toml`, `go.mod`, `Cargo.toml`.
 - Existing wiki project page.
+- Read-only Linear MCP activity metadata from the preceding seven days, only when it has an explicit or exact-alias mapping to the project page.
 
 Forbidden claims unless the source explicitly says them:
 
@@ -122,7 +133,7 @@ Forbidden claims unless the source explicitly says them:
 - OCR/model accuracy or settlement match rates.
 - ROI/time-saved numbers.
 
-Never use commit messages alone to update product positioning. Commit messages can populate `Recent Repo Activity`, but human-authored status changes require docs or explicit user direction.
+Never use commit messages or Linear activity alone to update product positioning. Commit messages can populate `Recent Repo Activity`, and Linear activity can populate the bounded `Linear Activity` subsection, but human-authored status changes require docs or explicit user direction.
 
 ## Known repo-title aliases
 
@@ -149,8 +160,8 @@ Recommended Hermes cron job:
 
 - Name: `imoto-wiki-weekly-autoupdate`
 - Schedule: `0 23 * * 5` (weekly Friday 23:00 local time)
-- Script: `imoto_wiki_repo_scan.py`
-- Skills: `obsidian-vault`, `obsidian`, `imoto-wiki-autoupdate`
+- Pre-run script: none. Have the agent run the canonical scanner directly from the cron prompt; Hermes rejects the runtime symlink because it resolves outside the permitted scripts directory. This also lets Linear-enabled runs continue their weekly Linear review when the scanner emits `{"wakeAgent": false}`.
+- Skills: `obsidian-vault`, `obsidian`, `imoto-wiki-autoupdate`, `native-mcp`
 - Toolsets: `terminal`, `file`, `code_execution`
 - Delivery: `discord:isitokaymimi` if weekly notifications are desired; otherwise `local` in CLI-only sessions.
 
@@ -164,6 +175,7 @@ Cron prompt must be self-contained. It should state that the agent is allowed to
 4. **Treating dirty state as shipped.** Dirty files are local evidence that work exists, not a release or project status change.
 5. **Creating messaging docs automatically.** Messaging docs are strategic artifacts. Flag missing docs; do not create/update them in the weekly job unless the user explicitly asks.
 6. **Letting unmapped repos disappear.** Always include unmapped Imoto-Labs repos in the summary so the user can decide whether to create pages.
+7. **Treating Linear as a decision log.** Use it only for factual recent execution activity inside the auto block; durable strategy and product decisions belong in repo docs and human-authored wiki sections.
 
 ## Verification checklist
 
@@ -172,4 +184,5 @@ Cron prompt must be self-contained. It should state that the agent is allowed to
 - [ ] Each edited page has valid frontmatter with `type:` and `status:`.
 - [ ] Each edited project page has at most one `AUTO:IMOTO-WIKI-START` block for that repo.
 - [ ] Summary lists changed repos, skipped repos, and unmapped repos.
+- [ ] Linear queries were read-only; mapped and unmapped Linear activity are both included in the summary when Linear was available.
 - [ ] No production credentials, secrets, or real driver PII were read into or written into the wiki.

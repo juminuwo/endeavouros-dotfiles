@@ -30,7 +30,6 @@
     ~/.claude/skills/tech-wiki: config/agent-skills/tech-wiki
     ~/.claude/skills/update-projects: config/agent-skills/update-projects
     ~/.claude/skills/obsidian-vault: config/agent-skills/obsidian-vault
-    ~/.claude/skills/kanban-sync: config/agent-skills/kanban-sync
     ~/.claude/skills/kitty-codex-agents: config/agent-skills/kitty-codex-agents
     ~/.claude/skills/imoto-one-pagers: config/agent-skills/imoto-one-pagers
     ~/.claude/skills/dotfiles-autoupdate: config/agent-skills/dotfiles-autoupdate
@@ -38,7 +37,6 @@
     ~/.agents/skills/tech-wiki: config/agent-skills/tech-wiki
     ~/.agents/skills/update-projects: config/agent-skills/update-projects
     ~/.agents/skills/obsidian-vault: config/agent-skills/obsidian-vault
-    ~/.agents/skills/kanban-sync: config/agent-skills/kanban-sync
     ~/.agents/skills/kitty-codex-agents: config/agent-skills/kitty-codex-agents
     ~/.agents/skills/imoto-one-pagers: config/agent-skills/imoto-one-pagers
     ~/.agents/skills/dotfiles-autoupdate: config/agent-skills/dotfiles-autoupdate
