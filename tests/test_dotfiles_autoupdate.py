@@ -24,7 +24,7 @@ def load_module():
 
 
 def init_repo(path: Path) -> None:
-    subprocess.run(["git", "init", "-q", str(path)], check=True)
+    subprocess.run(["git", "init", "-q", "-b", "main", str(path)], check=True)
     subprocess.run(["git", "-C", str(path), "config", "user.email", "test@example.invalid"], check=True)
     subprocess.run(["git", "-C", str(path), "config", "user.name", "Test User"], check=True)
     (path / "config").mkdir(parents=True)
@@ -192,13 +192,12 @@ def test_scan_creates_request_for_package_only_drift(tmp_path):
             "manifest": "config/packages-aur.txt",
             "packages": ["extra-aur"],
             "source": "extra_foreign",
-            "security_review_required": True,
         },
     ]
     assert "Package drift is report-only" in message
     assert "AUR/foreign package drift is security-sensitive" in message
-    assert "Bare Approved will be ignored" in message
-    assert "Approved  # also works" not in message
+    assert "approve dotfiles" in message
+
 
 
 def test_missing_package_drift_notifies_without_manifest_action(tmp_path):
@@ -300,7 +299,7 @@ def test_scan_creates_discord_message_for_codex_config_and_report_only_packages(
 
     assert scan["actionable"] is True
     assert "M config/codex-config.toml" in message
-    assert "approve dotfiles " in message
+    assert "approve dotfiles" in message
     assert "Package drift is report-only" in message
     assert "extra-native" in message
 
@@ -388,106 +387,32 @@ def test_apply_request_refuses_head_mismatch(tmp_path):
     assert "HEAD changed" in result["error"]
 
 
-def test_find_discord_approval_accepts_exact_request_id(tmp_path):
+def test_find_discord_approval_accepts_approval_for_current_snapshot(tmp_path):
     mod = load_module()
     state_dir = tmp_path / "state"
-    pending = state_dir / "pending"
-    pending.mkdir(parents=True)
     request = {"id": "20260101T000000Z-deadbeef", "created_at": "2026-01-01T00:00:00+00:00"}
-    (pending / "20260101T000000Z-deadbeef.json").write_text(json.dumps(request))
+    mod.save_pending(request, state_dir)
     log = tmp_path / "gateway.log"
     log.write_text(
         "2026-01-01 00:05:00,000 INFO gateway.run: inbound message: "
         "platform=discord user=isitokaymimi chat=1506284995818553374 "
-        "msg='approve dotfiles 20260101T000000Z-deadbeef' reply_to_id=None reply_to_text=''\n"
+        "msg='approve dotfiles' reply_to_id=None reply_to_text=''\n"
     )
 
     approval = mod.find_discord_approval(state_dir=state_dir, log_path=log)
 
     assert approval == {
         "request_id": "20260101T000000Z-deadbeef",
-        "mode": "explicit",
-        "message": "approve dotfiles 20260101T000000Z-deadbeef",
+        "mode": "current-snapshot",
+        "message": "approve dotfiles",
     }
 
 
-def test_find_discord_approval_accepts_exact_request_id_for_aur_package_actions(tmp_path):
+def test_find_discord_approval_ignores_unscoped_approval(tmp_path):
     mod = load_module()
     state_dir = tmp_path / "state"
-    pending = state_dir / "pending"
-    pending.mkdir(parents=True)
-    request = {
-        "id": "20260101T000000Z-deadbeef",
-        "created_at": "2026-01-01T00:00:00+00:00",
-        "actions": [
-            {
-                "type": "append_package_manifest",
-                "manifest": "config/packages-aur.txt",
-                "packages": ["new-aur"],
-                "source": "extra_foreign",
-                "security_review_required": True,
-            }
-        ],
-    }
-    (pending / "20260101T000000Z-deadbeef.json").write_text(json.dumps(request))
-    log = tmp_path / "gateway.log"
-    log.write_text(
-        "2026-01-01 00:05:00,000 INFO gateway.run: inbound message: "
-        "platform=discord user=isitokaymimi chat=1506284995818553374 "
-        "msg='approve dotfiles 20260101T000000Z-deadbeef' reply_to_id=None reply_to_text=''\n"
-    )
-
-    approval = mod.find_discord_approval(state_dir=state_dir, log_path=log)
-
-    assert approval == {
-        "request_id": "20260101T000000Z-deadbeef",
-        "mode": "explicit",
-        "message": "approve dotfiles 20260101T000000Z-deadbeef",
-    }
-
-
-def test_find_discord_approval_accepts_bare_approved_for_single_pending_request(tmp_path):
-    mod = load_module()
-    state_dir = tmp_path / "state"
-    pending = state_dir / "pending"
-    pending.mkdir(parents=True)
     request = {"id": "20260101T000000Z-deadbeef", "created_at": "2026-01-01T00:00:00+00:00"}
-    (pending / "20260101T000000Z-deadbeef.json").write_text(json.dumps(request))
-    log = tmp_path / "gateway.log"
-    log.write_text(
-        "2026-01-01 00:05:00,000 INFO gateway.run: inbound message: "
-        "platform=discord user=isitokaymimi chat=1506284995818553374 "
-        "msg='Approved' reply_to_id=None reply_to_text=''\n"
-    )
-
-    approval = mod.find_discord_approval(state_dir=state_dir, log_path=log)
-
-    assert approval == {
-        "request_id": "20260101T000000Z-deadbeef",
-        "mode": "single-pending-bare-approved",
-        "message": "Approved",
-    }
-
-
-def test_find_discord_approval_ignores_bare_approved_for_aur_package_actions(tmp_path):
-    mod = load_module()
-    state_dir = tmp_path / "state"
-    pending = state_dir / "pending"
-    pending.mkdir(parents=True)
-    request = {
-        "id": "20260101T000000Z-deadbeef",
-        "created_at": "2026-01-01T00:00:00+00:00",
-        "actions": [
-            {
-                "type": "append_package_manifest",
-                "manifest": "config/packages-aur.txt",
-                "packages": ["new-aur"],
-                "source": "extra_foreign",
-                "security_review_required": True,
-            }
-        ],
-    }
-    (pending / "20260101T000000Z-deadbeef.json").write_text(json.dumps(request))
+    mod.save_pending(request, state_dir)
     log = tmp_path / "gateway.log"
     log.write_text(
         "2026-01-01 00:05:00,000 INFO gateway.run: inbound message: "
@@ -498,15 +423,11 @@ def test_find_discord_approval_ignores_bare_approved_for_aur_package_actions(tmp
     assert mod.find_discord_approval(state_dir=state_dir, log_path=log) is None
 
 
-def test_find_discord_approval_ignores_bare_approved_when_multiple_requests_pending(tmp_path):
+def test_find_discord_approval_ignores_messages_before_current_snapshot(tmp_path):
     mod = load_module()
     state_dir = tmp_path / "state"
-    pending = state_dir / "pending"
-    pending.mkdir(parents=True)
-    for request_id in ("20260101T000000Z-deadbeef", "20260101T000100Z-feedface"):
-        (pending / f"{request_id}.json").write_text(
-            json.dumps({"id": request_id, "created_at": "2026-01-01T00:00:00+00:00"})
-        )
+    request = {"id": "20260101T000000Z-deadbeef", "created_at": "2026-01-01T00:10:00+00:00"}
+    mod.save_pending(request, state_dir)
     log = tmp_path / "gateway.log"
     log.write_text(
         "2026-01-01 00:05:00,000 INFO gateway.run: inbound message: "
@@ -515,3 +436,14 @@ def test_find_discord_approval_ignores_bare_approved_when_multiple_requests_pend
     )
 
     assert mod.find_discord_approval(state_dir=state_dir, log_path=log) is None
+
+
+def test_save_pending_replaces_the_previous_snapshot(tmp_path):
+    mod = load_module()
+    state_dir = tmp_path / "state"
+
+    mod.save_pending({"id": "first"}, state_dir)
+    mod.save_pending({"id": "second"}, state_dir)
+
+    assert mod.load_pending(state_dir) == {"id": "second"}
+    assert list(state_dir.glob("*.json")) == [state_dir / "pending.json"]

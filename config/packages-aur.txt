@@ -9,3 +9,4 @@ slack-desktop
 soundwire
 xmousepasteblock
 zen-browser-bin
+sunshine

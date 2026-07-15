@@ -146,16 +146,16 @@ WantedBy=default.target
 
 ## Scheduled dotfiles autoupdate
 
-`config/bin/dotfiles-autoupdate` is the approval-gated scanner for keeping this repo aligned with the live machine. Hermes runs the scanner daily at 19:00 and delivers output only to the Discord DM target `discord:isitokaymimi`. A second Hermes cron job checks that DM every 5 minutes for approval replies and applies the pending request without relying on the active chat context.
+`config/bin/dotfiles-autoupdate` is the approval-gated scanner for keeping this repo aligned with the live machine. Hermes runs the scanner daily at 19:00 and delivers drift only to the Discord DM `discord:1506284995818553374`. A second Hermes cron job checks that DM every 5 minutes for an approval reply and applies the current snapshot without relying on the active chat context. There is no request queue: each scan replaces the previous snapshot.
 The scanner stays silent when the only drift is the volatile Fcitx profile at `config/fcitx5/profile`.
 
 Commands:
 
 ```bash
 dotfiles-autoupdate scan          # read-only; prints nothing when there are no actionable changes
-dotfiles-autoupdate show <id>     # show a pending Discord approval request
-dotfiles-autoupdate apply <id>    # apply exactly the approved request, commit, and push
-dotfiles-autoupdate reject <id>   # reject a pending request
+dotfiles-autoupdate show          # show the current Discord approval snapshot
+dotfiles-autoupdate apply         # apply the current snapshot, commit, and push main
+dotfiles-autoupdate reject        # clear the current snapshot
 dotfiles-autoupdate approvals     # check Discord gateway history for approval replies
 ```
 
@@ -173,7 +173,7 @@ portable install targets live in `config/host/packages-extra-native-baseline.txt
 This keeps EndeavourOS/bootstrap packages out of daily drift alerts while still
 surfacing newly explicit native packages that need a keep/remove decision.
 
-Package drift creates a notification even when it is the only drift. Extra native packages can be approved into `config/packages-repo.txt`; extra AUR/foreign packages can be approved into `config/packages-aur.txt` only with exact `approve dotfiles <id>` approval after reviewing package ownership, PKGBUILD, and install scripts. Missing packages remain report-only and are not installed by the scanner. The apply step refuses to continue if the repo branch, HEAD, live unit hashes, or working-tree state changed after the scan. `approve dotfiles <id>` is preferred; a bare `Approved` also works when exactly one pending dotfiles request exists, except for requests containing AUR/foreign package additions.
+Package drift creates a notification even when it is the only drift. Extra native packages are added to `config/packages-repo.txt`; extra AUR/foreign packages are added to `config/packages-aur.txt` after Discord approval. Missing packages remain report-only and are not installed by the scanner. Reply `approve dotfiles` to commit and push the current snapshot directly to `main`; any other reply does nothing. The apply step refuses to continue unless the repo is checked out to `main` and the branch HEAD, live unit hashes, and working-tree state still match the scan. A successful apply verifies that the local repo is clean on `main` after the push.
 
 ## Repo layout
 
