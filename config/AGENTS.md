@@ -22,6 +22,16 @@ This file is the canonical personal agent guidance and is symlinked from `~/.cod
 - Shared Imoto Labs engineering guidance lives in `~/git/tech-handbook/`
 - Shared personal agent skills live in `~/git/endeavouros-dotfiles/config/agent-skills/`. Codex/Claude use symlinks; Hermes reads the directory via `skills.external_dirs`.
 
+## Imoto Labs Engineering Work
+When implementing or reviewing changes in an Imoto Labs repository, resolve the
+shared tech handbook from `$IMOTO_TECH_HANDBOOK`, a sibling
+`../tech-handbook` checkout, then `~/git/tech-handbook`.
+
+- For implementation and pull-request work, follow its `WORKFLOW.md`.
+- For review work, follow its `CODE_REVIEW.md`.
+- Repository instructions may define stricter requirements or justified
+  exceptions.
+
 ## Frontend and UI Design
 For frontend or UI work, read the repo root `DESIGN.md` when present before making visual changes. If a UI repo lacks one and the task requires design decisions, use the shared convention in `~/git/tech-handbook/standards/design-system.md` and starter template at `~/git/tech-handbook/templates/DESIGN.md`.
 
