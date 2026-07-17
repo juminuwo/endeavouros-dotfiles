@@ -14,6 +14,7 @@ Environment="HERMES_HOME=/home/howis/.hermes"
 Restart=always
 RestartSec=5
 RestartForceExitStatus=75
+RestartPreventExitStatus=78
 KillMode=mixed
 KillSignal=SIGTERM
 ExecReload=/bin/kill -USR1 $MAINPID
