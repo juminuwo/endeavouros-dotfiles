@@ -63,7 +63,7 @@ Do not rewrite human-authored summary, Status, ICP, messaging, Strategy, Release
    - Mention the update window, branch, latest commit, notable commits, dirty/uncommitted state, and source files reviewed.
    - Treat uncommitted local changes as local-only and not shipped.
 
-4. When the Linear MCP server is available, review activity from the preceding seven days using read-only Linear queries. Query only issue, project, document, and project/initiative status-update metadata. Do not create, update, comment on, or otherwise mutate Linear.
+4. When the Linear MCP server is available, review activity from the preceding seven days using read-only Linear queries. Query only issue, project, document, and **project** status-update metadata. Initiative status updates are optional: some workspaces have Roadmaps/initiatives disabled, in which case an initiative-status query returns an expected capability error. Do not treat that capability error as an MCP connection failure; report initiative activity as unavailable and continue with issues, projects, documents, and project status updates. Do not create, update, comment on, or otherwise mutate Linear.
    - Associate a Linear item with a project page only through an exact repo-title alias or an explicit project/repo link already present in the page or allowed repo docs.
    - Add a `### Linear Activity (past 7 days)` subsection inside the existing auto-managed block only when there is a clear association. Include concise, factual issue/project/document titles and their state or update timestamp.
    - If an item cannot be associated confidently, include it in the cron summary as "unmapped Linear activity" rather than guessing or creating a page.

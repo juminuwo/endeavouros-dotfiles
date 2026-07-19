@@ -19,7 +19,7 @@ KillMode=mixed
 KillSignal=SIGTERM
 ExecReload=/bin/kill -USR1 $MAINPID
 ExecStopPost=-/home/howis/.hermes/hermes-agent/venv/bin/python -m gateway.cgroup_cleanup
-TimeoutStopSec=90
+TimeoutStopSec=60
 StandardOutput=journal
 StandardError=journal
 
