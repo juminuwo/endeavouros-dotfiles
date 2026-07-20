@@ -8,6 +8,7 @@ Type=simple
 WorkingDirectory=/home/howis/git/driver-shield
 Environment=DRIVER_SHIELD_HOST=MAIN-demo
 Environment=PATH=/home/howis/.local/bin:/home/howis/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+EnvironmentFile=/home/howis/.config/driver-shield/hermes.env
 ExecStart=/home/howis/.local/bin/uv run driver-shield
 Restart=on-failure
 RestartSec=5
