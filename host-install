@@ -15,6 +15,9 @@ SYS_SRC="$BASEDIR/config/host/systemd/system"
 USER_SRC="$BASEDIR/config/host/systemd/user"
 USER_DST="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 
+# shellcheck source=config/host/systemd/hermes-driver-shield-cutover.sh
+source "$BASEDIR/config/host/systemd/hermes-driver-shield-cutover.sh"
+
 say() { printf '\n=== %s ===\n' "$*"; }
 
 enable_user_units() {
@@ -65,11 +68,21 @@ while IFS= read -r -d '' unit_file; do
   install -m 644 "$unit_file" "$USER_DST/$(basename "$unit_file")"
 done < <(find "$USER_SRC" -maxdepth 1 -type f \( -name '*.service' -o -name '*.timer' -o -name '*.target' \) -print0 | sort -z)
 
-# hermes-gateway-driver-shield-slack.service used to be installed directly
-# under default.target. It now belongs to work.target only.
-rm -f "$USER_DST/default.target.wants/hermes-gateway-driver-shield-slack.service"
+# Hermes self-refreshes the main profile gateway unit whenever the process
+# starts. The drop-in carries the repo-owned work.target relationship across
+# that rewrite.
+DRIVER_SHIELD_HERMES_DROPIN=hermes-gateway-driver-shield.service.d
+mkdir -p "$USER_DST/$DRIVER_SHIELD_HERMES_DROPIN"
+install -m 644 \
+  "$USER_SRC/$DRIVER_SHIELD_HERMES_DROPIN/10-work-target.conf" \
+  "$USER_DST/$DRIVER_SHIELD_HERMES_DROPIN/10-work-target.conf"
 
 systemctl --user daemon-reload
+
+# Preflight and start the replacement before retiring the old unit file. If
+# startup fails, the helper restores the previously active old gateway. At no
+# point may both services share the Slack Socket Mode token.
+hermes_driver_shield_cutover "$USER_DST"
 
 # ------------------------------------------------------------------
 # User unit enablement
@@ -86,7 +99,7 @@ say "Enabling automatic work target"
 enable_user_units \
   work.target \
   driver-shield-main-demo.service \
-  hermes-gateway-driver-shield-slack.service
+  hermes-gateway-driver-shield.service
 
 say "Enabling user timers"
 enable_user_units \
