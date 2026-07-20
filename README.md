@@ -58,7 +58,7 @@ Installs the systemd units that **can't** be symlinked because they need to live
 | `hermes-restic-backup.{service,timer}` | `~/.config/systemd/user/` | Encrypted restic backup of Hermes state and canonical agent skills |
 | `work.target` | `~/.config/systemd/user/` | Automatic group for work services |
 | `driver-shield-main-demo.service` | `~/.config/systemd/user/` | Driver Shield MAIN-demo API on port 8010 |
-| `hermes-gateway-driver-shield-slack.service` | `~/.config/systemd/user/` | Driver Shield Slack Hermes gateway, grouped under `work.target` |
+| `hermes-gateway-driver-shield.service` + `.service.d/10-work-target.conf` | `~/.config/systemd/user/` | Constrained Driver Shield Hermes API and optional Slack gateway; the drop-in preserves `work.target` ownership across Hermes' main-unit self-refresh |
 | `hermes-gateway.service` and personal daemons | `~/.config/systemd/user/` | Always-on user services under `default.target` |
 
 After install, timers and service groups are reloaded and enabled. The Hermes restic timer is only enabled when `~/.config/restic/hermes-password` exists. Re-run `./host-install` whenever you edit the unit files in `config/host/systemd/`.

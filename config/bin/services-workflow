@@ -55,7 +55,7 @@ case "$cmd" in
       logs)
         journalctl --user \
           -u driver-shield-main-demo.service \
-          -u hermes-gateway-driver-shield-slack.service \
+          -u hermes-gateway-driver-shield.service \
           -f
         ;;
       *)
