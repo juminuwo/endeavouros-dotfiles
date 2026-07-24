@@ -87,6 +87,7 @@ zoxide
 imagemagick
 wget
 pkgfile
+pacman-contrib
 7zip
 unrar
 unzip
@@ -139,6 +140,7 @@ kicad
 libreoffice-still
 meld
 mpv
+moonlight-qt
 imv
 obs-studio
 obsidian

@@ -2,11 +2,13 @@
 caffeine-ng
 cursor-bin
 google-chrome
+hunk-bin
 leaf-markdown-viewer-bin
+localsend-bin
 nordvpn-bin
 railwayapp-cli
 slack-desktop
 soundwire
+sunshine-bin
 xmousepasteblock
 zen-browser-bin
-sunshine

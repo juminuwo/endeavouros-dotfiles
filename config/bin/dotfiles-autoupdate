@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import ast
 import datetime as dt
+import fcntl
 import hashlib
 import json
 import os
@@ -13,6 +14,7 @@ import re
 import shutil
 import subprocess
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterable
 
@@ -20,8 +22,13 @@ from typing import Iterable
 REPO = Path(__file__).resolve().parents[2]
 DEFAULT_STATE_DIR = Path(os.environ.get("DOTFILES_AUTOUPDATE_STATE_DIR", "~/.cache/dotfiles-autoupdate")).expanduser()
 UNIT_SUFFIXES = {".service", ".timer", ".target"}
-APPROVE_RE = re.compile(r"^approve\s+dotfiles$", re.IGNORECASE)
-DISCORD_INBOUND_RE = re.compile(r"^(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+ .*inbound message: .*platform=discord .*user=isitokaymimi .* msg=(?P<msg>'.*?'|\".*?\") reply_to_id=")
+APPROVE_MESSAGE = "approve dotfiles"
+DISCORD_APPROVAL_CHAT = "1506284995818553374"
+DISCORD_INBOUND_RE = re.compile(
+    r"^(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d+) "
+    r".*inbound message: .*platform=discord .*user=isitokaymimi "
+    r"chat=(?P<chat>\S+) msg=(?P<msg>'.*?'|\".*?\") reply_to_id="
+)
 PACKAGE_NAME_RE = re.compile(r"^[A-Za-z0-9@._+-]+$")
 PACKAGE_ACTION_MANIFESTS = {
     "extra_native": "config/packages-repo.txt",
@@ -55,7 +62,7 @@ def remote_url(repo: Path) -> str:
 
 
 def git_status_lines(repo: Path) -> list[str]:
-    result = run(["git", "status", "--porcelain=v1", "--untracked-files=normal"], cwd=repo)
+    result = run(["git", "status", "--porcelain=v1", "--untracked-files=all"], cwd=repo)
     return [line for line in result.stdout.splitlines() if line.strip()]
 
 
@@ -64,6 +71,41 @@ def status_path(status_line: str) -> str:
     if " -> " in path:
         path = path.split(" -> ", 1)[1]
     return path.strip()
+
+
+def repo_state_sha256(repo: Path, status: Iterable[str]) -> str:
+    digest = hashlib.sha256()
+    for line in status:
+        path = status_path(line)
+        full_path = repo / path
+        digest.update(line.encode())
+        digest.update(b"\0")
+        if full_path.is_symlink():
+            digest.update(b"symlink\0")
+            digest.update(os.readlink(full_path).encode())
+        elif full_path.is_file():
+            digest.update(b"file\0")
+            digest.update(str(full_path.stat().st_mode & 0o7777).encode())
+            digest.update(b"\0")
+            digest.update(full_path.read_bytes())
+        elif full_path.exists():
+            digest.update(b"other\0")
+            digest.update(str(full_path.stat().st_mode & 0o7777).encode())
+        else:
+            digest.update(b"missing")
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+@contextmanager
+def state_lock(state_dir: Path):
+    state_dir.mkdir(parents=True, exist_ok=True)
+    with (state_dir / ".lock").open("a+") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
 def is_ignored_manifest_line(line: str) -> bool:
@@ -82,6 +124,37 @@ def explicit_packages(args: list[str]) -> set[str]:
     if result.returncode != 0:
         return set()
     return set(result.stdout.split())
+
+
+def package_state_sha256(
+    native_explicit: set[str],
+    foreign_explicit: set[str],
+    native_installed: set[str],
+    foreign_installed: set[str],
+) -> str:
+    state = {
+        "native_explicit": sorted(native_explicit),
+        "foreign_explicit": sorted(foreign_explicit),
+        "native_installed": sorted(native_installed),
+        "foreign_installed": sorted(foreign_installed),
+    }
+    return hashlib.sha256(json.dumps(state, sort_keys=True).encode()).hexdigest()
+
+
+def live_package_state_sha256() -> str:
+    queries = [
+        ["pacman", "-Qqen"],
+        ["pacman", "-Qqem"],
+        ["pacman", "-Qqn"],
+        ["pacman", "-Qqm"],
+    ]
+    results: list[set[str]] = []
+    for query in queries:
+        result = run(query, check=False)
+        if result.returncode != 0:
+            raise RuntimeError(f"Package query failed: {' '.join(query)}")
+        results.append(set(result.stdout.split()))
+    return package_state_sha256(*results)
 
 
 def load_link_entries(repo: Path) -> dict[str, str]:
@@ -207,6 +280,12 @@ def compare_packages(
     ignored_extra_native = read_package_manifest(repo / "config/host/packages-extra-native-baseline.txt")
     return {
         "report_only": True,
+        "state_sha256": package_state_sha256(
+            native_explicit,
+            foreign_explicit,
+            native_installed,
+            foreign_installed,
+        ),
         "extra_native": sorted(native_explicit - repo_native - ignored_extra_native),
         "extra_foreign": sorted(foreign_explicit - repo_foreign),
         "missing_native": sorted(repo_native - native_installed),
@@ -343,6 +422,7 @@ def build_scan(
         "head": current_head(repo),
         "remote": remote_url(repo),
         "git_status": status,
+        "repo_state_sha256": repo_state_sha256(repo, status),
         "unit_drift": units,
         "link_issues": links,
         "package_drift": packages,
@@ -359,65 +439,134 @@ def bullet_list(items: Iterable[str], *, limit: int = 12) -> list[str]:
     return shown
 
 
+def inline_list(items: Iterable[str], *, limit: int = 4) -> str:
+    values = [str(item) for item in items]
+    shown = ", ".join(values[:limit])
+    if len(values) > limit:
+        shown += f", +{len(values) - limit} more"
+    return shown
+
+
 def format_package_section(packages: dict[str, object]) -> list[str]:
     if not package_has_drift(packages):
         return []
-    lines = ["", "Package drift is report-only unless explicitly approved/classified:"]
+    lines = ["", "Package comparison:"]
     labels = [
-        ("explicit native packages not in manifests", "extra_native"),
-        ("explicit AUR/foreign packages not in manifest", "extra_foreign"),
-        ("manifest native packages not installed", "missing_native"),
-        ("manifest AUR packages not installed", "missing_foreign"),
+        ("installed native packages missing from repo manifests", "extra_native"),
+        ("installed AUR/foreign packages missing from repo manifest", "extra_foreign"),
+        ("repo native packages not installed on this machine", "missing_native"),
+        ("repo AUR packages not installed on this machine", "missing_foreign"),
     ]
     for label, key in labels:
         values = packages.get(key) or []
         lines.append(f"- {label}: {len(values)}")
         if values:
-            lines.extend(f"  - {item}" for item in list(values)[:8])
-            if len(values) > 8:
-                lines.append(f"  - … {len(values) - 8} more")
+            lines.extend(f"  - {item}" for item in values)
     if packages.get("extra_foreign"):
         lines.extend([
             "",
-            "AUR/foreign package drift is security-sensitive.",
-            "Review upstream package ownership, PKGBUILD, and install scripts before approving.",
+            "Review AUR package ownership, PKGBUILDs, and install scripts before approving.",
         ])
     return lines
 
 
 def format_discord_message(scan: dict[str, object]) -> str:
+    status = scan.get("git_status") or []
+    units = scan.get("unit_drift") or []
+    links = scan.get("link_issues") or []
+    packages = scan.get("package_drift") or {}
+    units_to_sync = [entry for entry in units if entry["status"] == "drift"]
+    units_notify_only = [entry for entry in units if entry["status"] != "drift"]
+    extra_native = packages.get("extra_native") or []
+    extra_foreign = packages.get("extra_foreign") or []
+    missing_native = packages.get("missing_native") or []
+    missing_foreign = packages.get("missing_foreign") or []
+    can_update_repo = bool(scan.get("actions"))
+
+    if can_update_repo:
+        lines = ["The dotfiles repo is behind this machine.", "", "Proposed repo update:"]
+        if status:
+            lines.append("- Changed repo files:")
+            for entry in status:
+                lines.append(f"  - `{entry[:2]}` {entry[3:]}")
+        if units_to_sync:
+            names = inline_list(entry["name"] for entry in units_to_sync)
+            lines.append(f"- Copied systemd units changed: {names}")
+        if extra_native:
+            lines.append(f"- Native packages to record: {inline_list(extra_native)}")
+        if extra_foreign:
+            lines.append(
+                f"- AUR packages to record: {inline_list(extra_foreign)} "
+                "(review PKGBUILDs before approving)"
+            )
+    else:
+        lines = ["This machine and the dotfiles repo differ.", "", "Review-only drift:"]
+
+    notify_only: list[str] = []
+    if units_notify_only:
+        notify_only.append(
+            f"systemd units not syncable: {inline_list(entry['name'] for entry in units_notify_only)}"
+        )
+    if links:
+        notify_only.append(f"dotbot link issues: {len(links)}")
+    if missing_native:
+        notify_only.append(f"repo native packages not installed: {inline_list(missing_native)}")
+    if missing_foreign:
+        notify_only.append(f"repo AUR packages not installed: {inline_list(missing_foreign)}")
+    if notify_only:
+        if can_update_repo:
+            lines.extend(["", "Review only (approval will not change these):"])
+        lines.extend(f"- {item}" for item in notify_only)
+
+    if can_update_repo:
+        lines.extend([
+            "",
+            "Approve updating the repo and pushing to `main`?",
+            "Reply `approve dotfiles`. Ignore this message to do nothing.",
+            "The next scan replaces this snapshot; there is no approval queue.",
+        ])
+    else:
+        lines.extend([
+            "",
+            "No automatic repo update is available. Reply `show dotfiles` for full details; no approval is needed.",
+        ])
+    return "\n".join(lines).strip() + "\n"
+
+
+def format_snapshot_details(scan: dict[str, object]) -> str:
     request_id = str(scan["id"])
-    lines = [f"Dotfiles scan found changes: {request_id}", ""]
+    lines = [f"Dotfiles snapshot: {request_id}", ""]
 
     status = scan.get("git_status") or []
     if status:
-        lines.append("Repo changes:")
-        lines.extend(bullet_list(status))
+        lines.append("Repo working-tree changes:")
+        lines.extend(bullet_list(status, limit=len(status)))
         lines.append("")
 
     units = scan.get("unit_drift") or []
     if units:
-        lines.append("Copied systemd unit drift:")
-        for entry in units[:12]:
+        lines.append("Copied systemd unit comparison:")
+        for entry in units:
             lines.append(f"- {entry['status']}: {entry['live_path']} -> {entry['repo_path']}")
-        if len(units) > 12:
-            lines.append(f"- … {len(units) - 12} more")
         lines.append("")
 
     links = scan.get("link_issues") or []
     if links:
-        lines.append("Dotbot link issues (notify-only; apply will not run ./install):")
-        for entry in links[:12]:
+        lines.append("Dotbot link issues (review only; approval does not run ./install):")
+        for entry in links:
             lines.append(f"- {entry['status']}: {entry['dest']} -> {entry['src']}")
-        if len(links) > 12:
-            lines.append(f"- … {len(links) - 12} more")
 
     lines.extend(format_package_section(scan.get("package_drift") or {}))
-    lines.extend([
-        "",
-        "Reply in Discord with `approve dotfiles` to commit and push this snapshot directly to main.",
-        "Any other reply does nothing. A later scan replaces this snapshot.",
-    ])
+    if scan.get("actions"):
+        lines.extend([
+            "",
+            "Reply `approve dotfiles` to apply this snapshot, commit it, and push `main`.",
+        ])
+    else:
+        lines.extend([
+            "",
+            "This snapshot has no automatic repo update. No approval is needed.",
+        ])
     return "\n".join(lines).strip() + "\n"
 
 
@@ -463,10 +612,14 @@ def discord_inbound_messages(log_path: Path) -> list[dict[str, object]]:
             continue
         try:
             message = ast.literal_eval(match.group("msg"))
-            timestamp = dt.datetime.strptime(match.group("ts"), "%Y-%m-%d %H:%M:%S")
+            timestamp = dt.datetime.strptime(match.group("ts"), "%Y-%m-%d %H:%M:%S,%f")
         except (SyntaxError, ValueError):
             continue
-        messages.append({"timestamp": timestamp, "message": message})
+        messages.append({
+            "timestamp": timestamp,
+            "chat": match.group("chat"),
+            "message": message,
+        })
     return messages
 
 
@@ -479,26 +632,20 @@ def find_discord_approval(
         request = load_pending(state_dir)
     except FileNotFoundError:
         return None
+    if not request.get("actions"):
+        return None
 
     for event in reversed(discord_inbound_messages(log_path)):
-        message = str(event["message"]).strip()
+        message = str(event["message"])
         approved_at = event["timestamp"]
-        if APPROVE_RE.fullmatch(message) and approved_at >= request_created_local(request):
+        if (
+            event["chat"] == DISCORD_APPROVAL_CHAT
+            and message == APPROVE_MESSAGE
+            and approved_at >= request_created_local(request)
+        ):
             return {"request_id": str(request["id"]), "mode": "current-snapshot", "message": message}
 
     return None
-
-
-def current_status_for_paths(repo: Path, planned_status: list[str]) -> tuple[bool, str]:
-    current = git_status_lines(repo)
-    planned_paths = {status_path(line) for line in planned_status}
-    current_for_planned = [line for line in current if status_path(line) in planned_paths]
-    if sorted(current_for_planned) != sorted(planned_status):
-        return False, "Repo status changed since scan; re-run scan before applying."
-    unexpected = [line for line in current if status_path(line) not in planned_paths]
-    if unexpected:
-        return False, "Unexpected repo changes appeared since scan: " + ", ".join(unexpected[:8])
-    return True, ""
 
 
 def validate_repo(repo: Path) -> list[str]:
@@ -525,21 +672,111 @@ def validate_repo(repo: Path) -> list[str]:
     return checks
 
 
-def apply_request(request: dict[str, object], *, repo: Path | None = None, dry_run: bool = False) -> dict[str, object]:
+def retry_pending_push(
+    request: dict[str, object],
+    repo: Path,
+    *,
+    dry_run: bool,
+) -> dict[str, object]:
+    commit = str(request.get("push_pending_commit") or "")
+    paths = sorted(str(path) for path in request.get("push_pending_paths") or [])
+    branch = current_branch(repo)
+    if branch != request.get("branch") or branch != "main":
+        return {"ok": False, "error": "Branch changed while a push retry was pending; manual recovery is required."}
+    if remote_url(repo) != str(request.get("remote") or ""):
+        return {"ok": False, "error": "Git origin changed while a push retry was pending; manual recovery is required."}
+    if current_head(repo) != commit:
+        return {"ok": False, "error": "HEAD changed while a push retry was pending; manual recovery is required."}
+    if git_status_lines(repo):
+        return {"ok": False, "error": "Repo changed while a push retry was pending; manual recovery is required."}
+    if dry_run:
+        return {
+            "ok": True,
+            "dry_run": True,
+            "checks": ["existing local commit is ready to retry"],
+            "paths": paths,
+            "commit": commit,
+        }
+
+    push = run(["git", "push", "origin", "main"], cwd=repo, check=False)
+    if push.returncode != 0:
+        return {
+            "ok": False,
+            "error": "git push origin main failed: " + (push.stderr.strip() or push.stdout.strip()),
+            "retryable_push": True,
+            "commit": commit,
+            "paths": paths,
+        }
+    return {
+        "ok": True,
+        "checks": ["retried existing local commit"],
+        "paths": paths,
+        "push": push.stdout.strip(),
+        "commit": commit,
+    }
+
+
+def save_push_retry(
+    request: dict[str, object],
+    result: dict[str, object],
+    state_dir: Path,
+) -> None:
+    request["push_pending_commit"] = result["commit"]
+    request["push_pending_paths"] = result["paths"]
+    request["push_retry_notified"] = True
+    save_pending(request, state_dir)
+
+
+def apply_request(
+    request: dict[str, object],
+    *,
+    repo: Path | None = None,
+    dry_run: bool = False,
+    package_state_override: str | None = None,
+) -> dict[str, object]:
     repo = (repo or Path(str(request["repo"]))).resolve()
-    if current_branch(repo) != "main":
+    if request.get("push_pending_commit"):
+        return retry_pending_push(request, repo, dry_run=dry_run)
+
+    branch = current_branch(repo)
+    if branch != request.get("branch"):
+        return {"ok": False, "error": "Branch changed since scan; re-run scan before applying."}
+    if branch != "main":
         return {"ok": False, "error": "Dotfiles repo is not checked out to main; re-run the scan from clean main."}
     if current_head(repo) != request.get("head"):
         return {"ok": False, "error": "HEAD changed since scan; re-run scan before applying."}
+    if remote_url(repo) != str(request.get("remote") or ""):
+        return {"ok": False, "error": "Git origin changed since scan; re-run scan before applying."}
+
+    planned_status = [str(line) for line in request.get("git_status") or []]
+    planned_repo_state = str(request.get("repo_state_sha256") or "")
+    if not planned_repo_state:
+        return {"ok": False, "error": "Snapshot lacks a repo state fingerprint; re-run the scan before applying."}
+    current_status = git_status_lines(repo)
+    if current_status != planned_status:
+        return {"ok": False, "error": "Repo status changed since scan; re-run scan before applying."}
+    if repo_state_sha256(repo, current_status) != planned_repo_state:
+        return {"ok": False, "error": "Repo contents changed since scan; re-run scan before applying."}
+
+    package_actions_present = any(
+        action.get("type") == "append_package_manifest"
+        for action in request.get("actions", [])
+    )
+    if package_actions_present:
+        expected_package_state = str((request.get("package_drift") or {}).get("state_sha256") or "")
+        if not expected_package_state:
+            return {"ok": False, "error": "Snapshot lacks a package state fingerprint; re-run the scan before applying."}
+        try:
+            current_package_state = package_state_override or live_package_state_sha256()
+        except RuntimeError as exc:
+            return {"ok": False, "error": str(exc)}
+        if current_package_state != expected_package_state:
+            return {"ok": False, "error": "Installed package state changed since scan; re-run scan before applying."}
 
     add_paths: set[str] = set()
     for action in request.get("actions", []):
         if action["type"] == "commit_repo_changes":
-            planned_status = list(action.get("status") or [])
-            ok, error = current_status_for_paths(repo, planned_status)
-            if not ok:
-                return {"ok": False, "error": error}
-            add_paths.update(status_path(line) for line in planned_status)
+            add_paths.update(status_path(line) for line in action.get("status") or [])
         elif action["type"] == "sync_live_unit":
             live = Path(action["live_path"])
             repo_file = repo / action["repo_path"]
@@ -571,60 +808,97 @@ def apply_request(request: dict[str, object], *, repo: Path | None = None, dry_r
 
     run(["git", "add", *sorted(add_paths)], cwd=repo)
     run(["git", "commit", "-m", "chore: sync dotfiles from host scan"], cwd=repo)
+    commit = current_head(repo)
     push = run(["git", "push", "origin", "main"], cwd=repo, check=False)
     if push.returncode != 0:
-        return {"ok": False, "error": "git push origin main failed: " + (push.stderr.strip() or push.stdout.strip())}
+        return {
+            "ok": False,
+            "error": "git push origin main failed: " + (push.stderr.strip() or push.stdout.strip()),
+            "retryable_push": True,
+            "commit": commit,
+            "paths": sorted(add_paths),
+        }
     status = git_status_lines(repo)
     if status:
         return {"ok": False, "error": "Commit pushed, but the local dotfiles repo is not clean: " + ", ".join(status[:8])}
-    return {"ok": True, "checks": checks, "paths": sorted(add_paths), "push": push.stdout.strip(), "commit": current_head(repo)}
+    return {"ok": True, "checks": checks, "paths": sorted(add_paths), "push": push.stdout.strip(), "commit": commit}
 
 
 def command_scan(args: argparse.Namespace) -> int:
-    scan = build_scan(repo=Path(args.repo), home=Path(args.home).expanduser(), system_dir=Path(args.system_dir))
-    if not scan["actionable"] or scan_is_silent_only_repo_status(scan):
-        clear_pending(Path(args.state_dir).expanduser())
-        return 0
-    save_pending(scan, Path(args.state_dir).expanduser())
+    state_dir = Path(args.state_dir).expanduser()
+    with state_lock(state_dir):
+        try:
+            pending = load_pending(state_dir)
+        except FileNotFoundError:
+            pending = {}
+        if pending.get("push_pending_commit"):
+            return 0
+        scan = build_scan(repo=Path(args.repo), home=Path(args.home).expanduser(), system_dir=Path(args.system_dir))
+        if not scan["actionable"] or scan_is_silent_only_repo_status(scan):
+            clear_pending(state_dir)
+            return 0
+        save_pending(scan, state_dir)
     sys.stdout.write(format_discord_message(scan))
     return 0
 
 
 def command_show(args: argparse.Namespace) -> int:
-    request = load_pending(Path(args.state_dir).expanduser())
-    sys.stdout.write(format_discord_message(request))
+    state_dir = Path(args.state_dir).expanduser()
+    with state_lock(state_dir):
+        request = load_pending(state_dir)
+    sys.stdout.write(format_snapshot_details(request))
     return 0
 
 
 def command_reject(args: argparse.Namespace) -> int:
     state_dir = Path(args.state_dir).expanduser()
-    clear_pending(state_dir)
+    with state_lock(state_dir):
+        clear_pending(state_dir)
     print("Cleared the pending dotfiles snapshot")
     return 0
 
 
 def command_apply(args: argparse.Namespace) -> int:
     state_dir = Path(args.state_dir).expanduser()
-    request = load_pending(state_dir)
-    result = apply_request(request, dry_run=args.dry_run)
-    if not result["ok"]:
-        print(f"Dotfiles apply failed: {result['error']}", file=sys.stderr)
-        return 1
-    if not args.dry_run:
-        clear_pending(state_dir)
+    with state_lock(state_dir):
+        request = load_pending(state_dir)
+        result = apply_request(request, dry_run=args.dry_run)
+        if not result["ok"]:
+            if result.get("retryable_push") and not args.dry_run:
+                save_push_retry(request, result, state_dir)
+            print(f"Dotfiles apply failed: {result['error']}", file=sys.stderr)
+            return 1
+        if not args.dry_run:
+            clear_pending(state_dir)
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 
 
 def command_approvals(args: argparse.Namespace) -> int:
     state_dir = Path(args.state_dir).expanduser()
-    approval = find_discord_approval(state_dir=state_dir, log_path=Path(args.log_path).expanduser())
-    if approval is None:
-        return 0
+    with state_lock(state_dir):
+        approval = find_discord_approval(state_dir=state_dir, log_path=Path(args.log_path).expanduser())
+        if approval is None:
+            return 0
 
-    request = load_pending(state_dir)
-    result = apply_request(request)
-    clear_pending(state_dir)
+        request = load_pending(state_dir)
+        if str(request.get("id")) != approval["request_id"]:
+            print("Dotfiles approval ignored because the pending snapshot changed; run a fresh scan.")
+            return 0
+        result = apply_request(request)
+        if result.get("retryable_push"):
+            already_notified = bool(request.get("push_retry_notified"))
+            save_push_retry(request, result, state_dir)
+            if already_notified:
+                return 0
+        elif request.get("push_pending_commit") and not result["ok"]:
+            previous_blocker = str(request.get("push_blocker") or "")
+            request["push_blocker"] = result["error"]
+            save_pending(request, state_dir)
+            if previous_blocker == result["error"]:
+                return 0
+        else:
+            clear_pending(state_dir)
     if not result["ok"]:
         print(f"Dotfiles approval {approval['request_id']} failed: {result['error']}")
         return 0

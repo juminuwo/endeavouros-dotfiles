@@ -53,6 +53,7 @@ Installs the systemd units that **can't** be symlinked because they need to live
 | Unit | Installed to | Purpose |
 |---|---|---|
 | `drive-sync.{service,timer}` | `/etc/systemd/system/` | Weekly external drive rsync (Sundays 5am) |
+| `paccache.timer` | Vendor unit under `/usr/lib/systemd/system/` | Weekly pacman package-cache cleanup; enablement is replayed by `host-install` |
 | `credit-claim.{service,timer}` | `~/.config/systemd/user/` | Daily oneshot, starting at 10:10 and moving 30s later after each success |
 | `imoto-wiki-publish.{service,timer}` | `~/.config/systemd/user/` | Periodic Imoto wiki publish job |
 | `hermes-restic-backup.{service,timer}` | `~/.config/systemd/user/` | Encrypted restic backup of Hermes state and canonical agent skills |
@@ -148,6 +149,7 @@ WantedBy=default.target
 
 `config/bin/dotfiles-autoupdate` is the approval-gated scanner for keeping this repo aligned with the live machine. Hermes runs the scanner daily at 19:00 and delivers drift only to the Discord DM `discord:1506284995818553374`. A second Hermes cron job checks that DM every 5 minutes for an approval reply and applies the current snapshot without relying on the active chat context. There is no request queue: each scan replaces the previous snapshot.
 The scanner stays silent when the only drift is one or both machine-state files: `config/codex-config.toml` and `config/fcitx5/profile`.
+The Discord notification lists every changed repo file with its Git status marker, summarizes other drift, and asks whether to update the repo only when the snapshot has applicable actions. Ignoring it does nothing; the next scan replaces the current unapproved snapshot, so there is no approval queue. `show dotfiles` returns the detailed snapshot. Notify-only drift is reported without an approval prompt.
 
 Commands:
 
@@ -173,7 +175,11 @@ portable install targets live in `config/host/packages-extra-native-baseline.txt
 This keeps EndeavourOS/bootstrap packages out of daily drift alerts while still
 surfacing newly explicit native packages that need a keep/remove decision.
 
-Package drift creates a notification even when it is the only drift. Extra native packages are added to `config/packages-repo.txt`; extra AUR/foreign packages are added to `config/packages-aur.txt` after Discord approval. Missing packages remain report-only and are not installed by the scanner. Reply `approve dotfiles` to commit and push the current snapshot directly to `main`; any other reply does nothing. The apply step refuses to continue unless the repo is checked out to `main` and the branch HEAD, live unit hashes, and working-tree state still match the scan. A successful apply verifies that the local repo is clean on `main` after the push.
+Package drift creates a notification even when it is the only drift. Extra native packages are added to `config/packages-repo.txt`; extra AUR/foreign packages are added to `config/packages-aur.txt` after Discord approval. Missing packages remain report-only, are not installed by the scanner, and do not produce an approval prompt by themselves. Reply `approve dotfiles` only when the notification asks to update the repo; any other reply does nothing. The apply step commits and pushes the current snapshot directly to `main`, but refuses to continue unless the repo is checked out to the scanned `main` branch and the HEAD, `origin`, live unit hashes, and content-fingerprinted working tree still match the scan. Snapshots with package-manifest additions also require the installed package state to match. A successful apply verifies that the local repo is clean on `main` after the push.
+
+If the local commit succeeds but `git push` fails, the snapshot retains that
+exact commit and the approval monitor retries only the push. Daily scans do not
+replace pending push recovery, and a retry never creates a second commit.
 
 ## Repo layout
 

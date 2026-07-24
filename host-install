@@ -3,6 +3,7 @@
 #   - hardware-specific packages from config/host/packages-host-repo.txt
 #       (NVIDIA driver/CUDA, Intel microcode, etc. — varies per machine)
 #   - /etc/systemd/system/drive-sync.{service,timer}            (system, root)
+#   - vendor paccache.timer enablement                           (system, root)
 #   - host-specific ~/.config/systemd/user/*.service/*.timer/*.target
 #   - user unit enablement groups: default.target, work.target, timers.target
 #
@@ -57,6 +58,15 @@ sudo install -m 644 "$SYS_SRC/drive-sync.timer"   /etc/systemd/system/drive-sync
 
 sudo systemctl daemon-reload
 sudo systemctl enable --now drive-sync.timer
+
+# paccache.timer is provided and maintained by pacman-contrib. Keep only its
+# desired enablement in this repo; do not copy the vendor unit into /etc.
+say "Enabling automatic pacman cache cleanup"
+if systemctl cat paccache.timer >/dev/null 2>&1; then
+  sudo systemctl enable --now paccache.timer
+else
+  printf 'Skipping paccache.timer; install pacman-contrib first.\n'
+fi
 
 # ------------------------------------------------------------------
 # User units — copied into ~/.config/systemd/user
@@ -117,7 +127,7 @@ fi
 # Verify
 # ------------------------------------------------------------------
 say "Verifying timer status"
-systemctl list-timers --all --no-pager | grep -E 'drive-sync|credit-claim|imoto-wiki' || true
+systemctl list-timers --all --no-pager | grep -E 'drive-sync|paccache|credit-claim|imoto-wiki' || true
 systemctl --user list-timers --all --no-pager | grep -E 'credit-claim|imoto-wiki|hermes-restic' || true
 systemctl --user list-dependencies work.target --plain --no-pager || true
 
