@@ -1,0 +1,18 @@
+[opener]
+edit_text = [
+	{ run = 'nvim %s', block = true, desc = "Neovim", for = "unix" },
+]
+system_open = [
+	{ run = 'xdg-open %s1', orphan = true, desc = "System Open (Browser)", for = "linux" },
+]
+leaf = [
+	{ run = 'leaf %s1', block = true, desc = "Leaf", for = "unix" },
+]
+
+[open]
+prepend_rules = [
+	{ url = "*.html", use = [ "edit_text", "system_open" ] },
+	{ url = "*.htm", use = [ "edit_text", "system_open" ] },
+	{ url = "*.md", use = [ "edit_text", "leaf" ] },
+	{ url = "*.markdown", use = [ "edit_text", "leaf" ] },
+]
