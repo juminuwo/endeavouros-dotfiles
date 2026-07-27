@@ -11,4 +11,5 @@ slack-desktop
 soundwire
 sunshine-bin
 xmousepasteblock
+yacreader-bin
 zen-browser-bin
