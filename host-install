@@ -103,8 +103,7 @@ enable_user_units \
   kittylitter.service \
   mahore-viewer.service \
   mmo-mouse-workspaces.service \
-  rclone-pcloud.service \
-  yacreaderlibraryserver.service
+  rclone-pcloud.service
 
 say "Enabling automatic work target"
 enable_user_units \
