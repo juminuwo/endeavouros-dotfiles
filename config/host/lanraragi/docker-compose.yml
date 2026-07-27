@@ -1,0 +1,11 @@
+services:
+  lanraragi:
+    image: difegue/lanraragi:latest
+    container_name: lanraragi
+    ports:
+      - "3002:3000"
+    volumes:
+      - /mnt/Main/ebooks/manga:/home/koyomi/lanraragi/content
+      - /home/howis/.local/share/lanraragi/database:/home/koyomi/lanraragi/database
+      - /home/howis/.local/share/lanraragi/thumb:/home/koyomi/lanraragi/thumb
+    restart: unless-stopped

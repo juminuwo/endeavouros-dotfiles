@@ -218,4 +218,5 @@ These aren't run by any script — do them once per machine:
 - **Drive sync UUIDs**: edit `config/host/sync-drives.sh` and set `MAIN_UUID` / `BACKUP_UUID`. See `config/host/DRIVE-SYNC-SETUP.md`.
 - **Credit-claim**: drop the bearer token at `~/.config/credit-claim/token` and the target URL at `~/.config/credit-claim/api_url` (the script reads both from there). See `config/host/credit-claim/README.md`.
 - **Jellyfin**: data lives at `/opt/jellyfin/{config,cache}` and media at `/mnt/Main/Videos/`. Start with `cd config/host/jellyfin && docker compose up -d`.
+- **LANraragi**: archives live at `/mnt/Main/ebooks/manga`, with its database and thumbnails under `~/.local/share/lanraragi/`. Start with `cd config/host/lanraragi && docker compose up -d`; browse at `http://localhost:3002`.
 - **Laptop battery indicator**: uncomment the `[battery]` block in `config/i3/i3blocks.conf` (~line 144) — requires `acpi`.
