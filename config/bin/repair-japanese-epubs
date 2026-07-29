@@ -21,7 +21,7 @@ from xml.etree import ElementTree
 
 
 DEFAULT_LIBRARY = Path("/mnt/Main/ebooks/calibre-library")
-DEFAULT_BACKUP_ROOT = Path.home() / "services/calibre-web/backups/japanese-epubs"
+DEFAULT_BACKUP_ROOT = Path("/mnt/Main/ebooks/archive/backups/japanese-epubs")
 WRITING_MODE_MARKER = "repair-japanese-epubs: standards writing-mode compatibility"
 DIRECTION_MARKER = "repair-japanese-epubs: top-to-bottom vertical inline direction"
 WRITING_MODE_RE = re.compile(r"(?<![-\w])writing-mode\s*:\s*([^;}]+)", re.I)

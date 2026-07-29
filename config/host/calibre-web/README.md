@@ -105,7 +105,7 @@ Before replacing a managed EPUB through Calibre's database interface, the tool
 makes a byte-for-byte backup and JSON manifest under:
 
 ```text
-~/services/calibre-web/backups/japanese-epubs/<timestamp>/
+/mnt/Main/ebooks/archive/backups/japanese-epubs/<timestamp>/
 ```
 
 Calibre's desktop viewer may later update its embedded reading-position data
