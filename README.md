@@ -218,5 +218,5 @@ These aren't run by any script — do them once per machine:
 - **Drive sync UUIDs**: edit `config/host/sync-drives.sh` and set `MAIN_UUID` / `BACKUP_UUID`. See `config/host/DRIVE-SYNC-SETUP.md`.
 - **Credit-claim**: drop the bearer token at `~/.config/credit-claim/token` and the target URL at `~/.config/credit-claim/api_url` (the script reads both from there). See `config/host/credit-claim/README.md`.
 - **Jellyfin**: data lives at `/opt/jellyfin/{config,cache}` and media at `/mnt/Main/Videos/`. Start with `cd config/host/jellyfin && docker compose up -d`.
-- **LANraragi**: archives live at `/mnt/Main/ebooks/manga`, with its database and thumbnails under `~/.local/share/lanraragi/`. Start with `cd config/host/lanraragi && docker compose up -d`; browse at `http://localhost:3002`.
+- **Calibre + Calibre-Web**: native Calibre owns `/mnt/Main/ebooks/calibre-library`; untouched source files remain under `/mnt/Main/ebooks/archive/`. The tracked Compose file is linked to `~/services/calibre-web/compose.yaml`, and persistent web state lives under `~/services/calibre-web/config/`. Run `repair-japanese-epubs` after importing Japanese EPUBs and follow `config/host/calibre-web/README.md` for repairs and service lifecycle.
 - **Laptop battery indicator**: uncomment the `[battery]` block in `config/i3/i3blocks.conf` (~line 144) — requires `acpi`.

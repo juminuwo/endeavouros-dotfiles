@@ -1,5 +1,6 @@
 # AUR packages
 caffeine-ng
+calibre-bin
 cursor-bin
 google-chrome
 hunk-bin
