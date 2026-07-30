@@ -62,6 +62,7 @@ python-lxml
 python-packaging
 python-pyqt6
 jq
+epubcheck
 strace
 plocate
 

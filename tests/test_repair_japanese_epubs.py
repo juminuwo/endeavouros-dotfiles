@@ -29,6 +29,8 @@ def make_epub(
     root_attributes: str = "",
     body_class: str = "vbody",
     css: str = ".vbody { writing-mode: vertical-rl; }\n",
+    second_root_attributes: str | None = None,
+    second_body_class: str = "hbody",
 ) -> object:
     container = """<?xml version="1.0" encoding="UTF-8"?>
 <container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"
@@ -39,7 +41,15 @@ def make_epub(
   </rootfiles>
 </container>
 """
-    package = """<?xml version="1.0" encoding="UTF-8"?>
+    second_manifest = """
+    <item id="chapter2" href="chapter2.xhtml"
+          media-type="application/xhtml+xml"/>""" if second_root_attributes is not None else ""
+    second_spine = (
+        '\n    <itemref idref="chapter2"/>'
+        if second_root_attributes is not None
+        else ""
+    )
+    package = f"""<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf"
          xmlns:dc="http://purl.org/dc/elements/1.1/"
          version="3.0" unique-identifier="id">
@@ -51,13 +61,22 @@ def make_epub(
   </metadata>
   <manifest>
     <item id="chapter" href="chapter.xhtml"
-          media-type="application/xhtml+xml"/>
+          media-type="application/xhtml+xml"/>{second_manifest}
     <item id="style" href="style.css" media-type="text/css"/>
   </manifest>
   <spine page-progression-direction="rtl">
-    <itemref idref="chapter"/>
+    <itemref idref="chapter"/>{second_spine}
   </spine>
 </package>
+"""
+    second_chapter = f"""<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"{second_root_attributes or ""}>
+  <head>
+    <title>Fixture 2</title>
+    <link rel="stylesheet" type="text/css" href="style.css"/>
+  </head>
+  <body class="{second_body_class}"><p>横書き</p></body>
+</html>
 """
     chapter = f"""<?xml version="1.0" encoding="UTF-8"?>
 <html xmlns="http://www.w3.org/1999/xhtml"{root_attributes}>
@@ -79,6 +98,8 @@ def make_epub(
         archive.writestr("META-INF/container.xml", container)
         archive.writestr("content.opf", package)
         archive.writestr("chapter.xhtml", chapter)
+        if second_root_attributes is not None:
+            archive.writestr("chapter2.xhtml", second_chapter)
         archive.writestr("style.css", css)
     return REPAIR.Book(
         book_id=1,
@@ -129,9 +150,10 @@ class JapaneseEpubRepairTests(unittest.TestCase):
     def test_root_class_only_repair_uses_existing_principal_css(self) -> None:
         book = make_epub(
             self.temp_path / "class-only.epub",
+            root_attributes=' dir="ltr"',
             css=(
                 ".vbody { writing-mode: vertical-rl; }\n"
-                "html.vrtl { writing-mode: vertical-rl; direction: ltr; }\n"
+                "html.vrtl { writing-mode: vertical-rl; }\n"
             ),
         )
 
@@ -140,7 +162,7 @@ class JapaneseEpubRepairTests(unittest.TestCase):
         self.assertEqual(audit.status, "needs-fix")
         self.assertEqual(audit.root_class_updates, ("chapter.xhtml=vrtl",))
         self.assertEqual(audit.missing_modes, ())
-        self.assertEqual(audit.missing_direction_selectors, ())
+        self.assertEqual(audit.root_direction_updates, ())
         self.assertIsNone(audit.css_member)
         self.assertEqual(set(audit.member_updates), {"chapter.xhtml"})
         patched = self.temp_path / "class-only-patched.epub"
@@ -172,7 +194,6 @@ class JapaneseEpubRepairTests(unittest.TestCase):
             body_class="vrtl",
             css=(
                 "body.vrtl { writing-mode: vertical-rl; }\n"
-                "html.vrtl { direction: ltr; }\n"
             ),
         )
 
@@ -187,7 +208,7 @@ class JapaneseEpubRepairTests(unittest.TestCase):
             root_attributes=' class="vrtl"',
             body_class="vrtl",
             css=(
-                "html.vrtl { writing-mode: vertical-rl; direction: ltr; }\n"
+                "html.vrtl { writing-mode: vertical-rl; }\n"
                 ".vrtl { writing-mode: horizontal-tb; }\n"
             ),
         )
@@ -204,7 +225,7 @@ class JapaneseEpubRepairTests(unittest.TestCase):
             body_class="vrtl",
             css=(
                 "html { writing-mode: horizontal-tb !important; }\n"
-                "html.vrtl { writing-mode: vertical-rl; direction: ltr; }\n"
+                "html.vrtl { writing-mode: vertical-rl; }\n"
             ),
         )
 
@@ -220,7 +241,7 @@ class JapaneseEpubRepairTests(unittest.TestCase):
             body_class="vrtl",
             css=(
                 ":root { writing-mode: horizontal-tb !important; }\n"
-                "html.vrtl { writing-mode: vertical-rl; direction: ltr; }\n"
+                "html.vrtl { writing-mode: vertical-rl; }\n"
             ),
         )
 
@@ -235,7 +256,7 @@ class JapaneseEpubRepairTests(unittest.TestCase):
             root_attributes=' class="vrtl"',
             body_class="vrtl",
             css=(
-                "html.vrtl { writing-mode: vertical-rl; direction: ltr; }\n"
+                "html.vrtl { writing-mode: vertical-rl; }\n"
                 "html.vrtl body { direction: rtl; }\n"
             ),
         )
@@ -243,7 +264,7 @@ class JapaneseEpubRepairTests(unittest.TestCase):
         audit = REPAIR.audit_book(book)
 
         self.assertEqual(audit.status, "unsupported")
-        self.assertIn("conflicting RTL", audit.reason)
+        self.assertIn("publisher-authored CSS direction", audit.reason)
 
     def test_body_direction_does_not_satisfy_principal_direction(self) -> None:
         css = "body.vrtl { direction: ltr; }"
@@ -257,6 +278,244 @@ class JapaneseEpubRepairTests(unittest.TestCase):
                 principal=True,
             )
         )
+
+    def test_missing_direction_is_added_to_xhtml_root_not_css(self) -> None:
+        book = make_epub(
+            self.temp_path / "root-direction.epub",
+            root_attributes=' class="vrtl"',
+            css="html.vrtl { writing-mode: vertical-rl; }\n",
+        )
+
+        audit = REPAIR.audit_book(book)
+
+        self.assertEqual(audit.status, "needs-fix")
+        self.assertEqual(audit.root_direction_updates, ("chapter.xhtml",))
+        patched = self.temp_path / "root-direction-patched.epub"
+        REPAIR.write_patched_epub(book.path, patched, audit.member_updates)
+        with zipfile.ZipFile(patched) as archive:
+            chapter = archive.read("chapter.xhtml").decode("utf-8")
+            css = archive.read("style.css").decode("utf-8")
+        self.assertIn('<html xmlns="http://www.w3.org/1999/xhtml" class="vrtl" dir="ltr">', chapter)
+        self.assertNotIn("direction:", css)
+
+    def test_existing_root_direction_is_idempotent(self) -> None:
+        book = make_epub(
+            self.temp_path / "already-correct.epub",
+            root_attributes=" class='vrtl' dir='ltr'",
+            css="html.vrtl { writing-mode: vertical-rl; }\n",
+        )
+
+        audit = REPAIR.audit_book(book)
+
+        self.assertEqual(audit.status, "ok")
+        self.assertEqual(audit.member_updates, {})
+
+    def test_root_rtl_direction_is_rejected(self) -> None:
+        book = make_epub(
+            self.temp_path / "root-rtl.epub",
+            root_attributes=' class="vrtl" dir="rtl"',
+            css="html.vrtl { writing-mode: vertical-rl; }\n",
+        )
+
+        audit = REPAIR.audit_book(book)
+
+        self.assertEqual(audit.status, "unsupported")
+        self.assertIn("conflicting RTL", audit.reason)
+
+    def test_legacy_generated_css_is_migrated(self) -> None:
+        book = make_epub(
+            self.temp_path / "legacy.epub",
+            root_attributes=' class="vrtl"',
+            css=(
+                "html.vrtl { writing-mode: vertical-rl; }\n\n"
+                f"/* {REPAIR.DIRECTION_MARKER} */\n"
+                "html.vrtl {\n"
+                "  direction: ltr;\n"
+                "}\n"
+            ),
+        )
+
+        audit = REPAIR.audit_book(book)
+
+        self.assertEqual(audit.status, "needs-fix")
+        self.assertEqual(audit.root_direction_updates, ("chapter.xhtml",))
+        self.assertEqual(audit.removed_legacy_direction_css, ("style.css",))
+        patched = self.temp_path / "legacy-patched.epub"
+        REPAIR.write_patched_epub(book.path, patched, audit.member_updates)
+        with zipfile.ZipFile(patched) as archive:
+            self.assertNotIn(
+                REPAIR.DIRECTION_MARKER,
+                archive.read("style.css").decode("utf-8"),
+            )
+        repaired_book = REPAIR.Book(
+            book_id=book.book_id,
+            title=book.title,
+            relative_dir=book.relative_dir,
+            format_name=book.format_name,
+            database_languages=book.database_languages,
+            path=patched,
+        )
+        self.assertEqual(REPAIR.audit_book(repaired_book).status, "ok")
+
+    def test_older_legacy_class_selector_is_migrated(self) -> None:
+        book = make_epub(
+            self.temp_path / "older-legacy.epub",
+            root_attributes=' class="vrtl"',
+            css=(
+                "html.vrtl { writing-mode: vertical-rl; }\n\n"
+                f"/* {REPAIR.DIRECTION_MARKER} */\n"
+                ".tate-0w-off {\n"
+                "  direction: ltr;\n"
+                "}\n"
+            ),
+        )
+
+        audit = REPAIR.audit_book(book)
+
+        self.assertEqual(audit.status, "needs-fix")
+        self.assertEqual(audit.removed_legacy_direction_css, ("style.css",))
+
+    def test_unmarked_publisher_direction_is_preserved_for_manual_review(self) -> None:
+        css = (
+            "html.vrtl { writing-mode: vertical-rl; direction: ltr; }\n"
+            ".publisher-rule { color: red; }\n"
+        )
+        book = make_epub(
+            self.temp_path / "publisher-direction.epub",
+            root_attributes=' class="vrtl"',
+            css=css,
+        )
+
+        audit = REPAIR.audit_book(book)
+
+        self.assertEqual(audit.status, "unsupported")
+        self.assertIn("publisher-authored CSS direction", audit.reason)
+        with zipfile.ZipFile(book.path) as archive:
+            self.assertEqual(archive.read("style.css").decode("utf-8"), css)
+
+    def test_root_attribute_update_preserves_existing_quote_style(self) -> None:
+        source = (
+            b"<?xml version='1.0'?>\n"
+            b"<html xmlns='http://www.w3.org/1999/xhtml' class='vrtl' xml:lang='ja'>"
+            b"<head/><body/></html>"
+        )
+
+        updated = REPAIR.update_root_attributes(source, direction="ltr")
+
+        self.assertIn(
+            b"<html xmlns='http://www.w3.org/1999/xhtml' class='vrtl' "
+            b"xml:lang='ja' dir=\"ltr\">",
+            updated,
+        )
+
+    def test_mixed_layout_only_adds_direction_to_vertical_document(self) -> None:
+        book = make_epub(
+            self.temp_path / "mixed.epub",
+            root_attributes=' class="vrtl"',
+            body_class="vbody",
+            second_root_attributes=' class="hltr"',
+            second_body_class="hbody",
+            css=(
+                ".vbody, html.vrtl { writing-mode: vertical-rl; }\n"
+                ".hbody, html.hltr { writing-mode: horizontal-tb; }\n"
+            ),
+        )
+
+        audit = REPAIR.audit_book(book)
+
+        self.assertEqual(audit.status, "needs-fix")
+        self.assertEqual(audit.root_direction_updates, ("chapter.xhtml",))
+        self.assertEqual(set(audit.member_updates), {"chapter.xhtml"})
+        patched = self.temp_path / "mixed-patched.epub"
+        REPAIR.write_patched_epub(book.path, patched, audit.member_updates)
+        with zipfile.ZipFile(patched) as archive:
+            vertical = archive.read("chapter.xhtml").decode("utf-8")
+            horizontal = archive.read("chapter2.xhtml").decode("utf-8")
+        self.assertIn('dir="ltr"', vertical)
+        self.assertNotIn('dir="ltr"', horizontal)
+
+    def test_all_vertical_documents_receive_root_direction(self) -> None:
+        book = make_epub(
+            self.temp_path / "two-vertical.epub",
+            root_attributes=' class="vrtl"',
+            body_class="vbody",
+            second_root_attributes=' class="vrtl"',
+            second_body_class="vbody",
+            css=".vbody, html.vrtl { writing-mode: vertical-rl; }\n",
+        )
+
+        audit = REPAIR.audit_book(book)
+
+        self.assertEqual(
+            audit.root_direction_updates,
+            ("chapter.xhtml", "chapter2.xhtml"),
+        )
+
+    def test_hybrid_root_and_body_vertical_documents_are_all_repaired(self) -> None:
+        book = make_epub(
+            self.temp_path / "hybrid-vertical.epub",
+            root_attributes=' class="vrtl"',
+            body_class="vbody",
+            second_root_attributes="",
+            second_body_class="vbody",
+            css=".vbody, html.vrtl { writing-mode: vertical-rl; }\n",
+        )
+
+        audit = REPAIR.audit_book(book)
+
+        self.assertEqual(audit.status, "needs-fix")
+        self.assertEqual(
+            audit.root_direction_updates,
+            ("chapter.xhtml", "chapter2.xhtml"),
+        )
+        self.assertEqual(
+            audit.root_class_updates,
+            ("chapter2.xhtml=vrtl",),
+        )
+        patched = self.temp_path / "hybrid-vertical-patched.epub"
+        REPAIR.write_patched_epub(book.path, patched, audit.member_updates)
+        repaired_book = REPAIR.Book(
+            book_id=book.book_id,
+            title=book.title,
+            relative_dir=book.relative_dir,
+            format_name=book.format_name,
+            database_languages=book.database_languages,
+            path=patched,
+        )
+        self.assertEqual(REPAIR.audit_book(repaired_book).status, "ok")
+
+    def test_hybrid_horizontal_document_gets_principal_root_mode(self) -> None:
+        book = make_epub(
+            self.temp_path / "hybrid-horizontal.epub",
+            root_attributes=' class="vrtl"',
+            body_class="vbody",
+            second_root_attributes="",
+            second_body_class="hbody",
+            css=(
+                ".vbody, html.vrtl { writing-mode: vertical-rl; }\n"
+                ".hbody, html.hltr { writing-mode: horizontal-tb; }\n"
+            ),
+        )
+
+        audit = REPAIR.audit_book(book)
+
+        self.assertEqual(audit.status, "needs-fix")
+        self.assertEqual(audit.root_direction_updates, ("chapter.xhtml",))
+        self.assertEqual(
+            audit.root_class_updates,
+            ("chapter2.xhtml=hltr",),
+        )
+        patched = self.temp_path / "hybrid-horizontal-patched.epub"
+        REPAIR.write_patched_epub(book.path, patched, audit.member_updates)
+        repaired_book = REPAIR.Book(
+            book_id=book.book_id,
+            title=book.title,
+            relative_dir=book.relative_dir,
+            format_name=book.format_name,
+            database_languages=book.database_languages,
+            path=patched,
+        )
+        self.assertEqual(REPAIR.audit_book(repaired_book).status, "ok")
 
 
 if __name__ == "__main__":

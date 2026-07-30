@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import posixpath
 import re
 import shutil
@@ -35,6 +36,12 @@ ROOT_HTML_RE = re.compile(
 CLASS_ATTRIBUTE_RE = re.compile(
     r"(\sclass\s*=\s*)([\"'])(.*?)\2", re.I | re.S
 )
+DIR_ATTRIBUTE_RE = re.compile(
+    r"(\sdir\s*=\s*)([\"'])(.*?)\2", re.I | re.S
+)
+LEGACY_DIRECTION_COMMENT_RE = re.compile(
+    r"/\*\s*" + re.escape(DIRECTION_MARKER) + r"\s*\*/", re.I | re.S
+)
 
 
 @dataclass(frozen=True)
@@ -54,8 +61,9 @@ class Audit:
     reason: str
     internal_languages: tuple[str, ...] = ()
     missing_modes: tuple[str, ...] = ()
-    missing_direction_selectors: tuple[str, ...] = ()
+    root_direction_updates: tuple[str, ...] = ()
     root_class_updates: tuple[str, ...] = ()
+    removed_legacy_direction_css: tuple[str, ...] = ()
     css_member: str | None = None
     member_updates: dict[str, bytes] = field(default_factory=dict)
 
@@ -216,6 +224,7 @@ def document_details(
     dict[str, set[str]],
     dict[str, set[str]],
     dict[str, set[str]],
+    dict[str, str],
 ]:
     classes: dict[str, set[str]] = {"vrtl": set(), "hltr": set()}
     stylesheets: dict[str, set[str]] = {}
@@ -226,6 +235,7 @@ def document_details(
     document_modes: dict[str, set[str]] = {}
     document_root_directions: dict[str, set[str]] = {}
     document_directions: dict[str, set[str]] = {}
+    document_root_dir_attributes: dict[str, str] = {}
     for content_member in content_members:
         try:
             root = ElementTree.fromstring(archive.read(content_member))
@@ -243,6 +253,7 @@ def document_details(
         body_classes: set[str] = set()
         if root.attrib.get("dir", "").lower() in {"ltr", "rtl"}:
             root_directions.add(root.attrib["dir"].lower())
+            document_root_dir_attributes[content_member] = root.attrib["dir"].lower()
         explicit_directions = set(root_directions)
         for element in root.iter():
             if local_name(element.tag) == "body":
@@ -291,6 +302,7 @@ def document_details(
         document_modes,
         document_root_directions,
         document_directions,
+        document_root_dir_attributes,
     )
 
 
@@ -303,7 +315,12 @@ def decode_css(data: bytes) -> tuple[str, str]:
         raise EpubError("referenced stylesheet is not UTF-8") from error
 
 
-def add_root_class(data: bytes, class_name: str) -> bytes:
+def update_root_attributes(
+    data: bytes,
+    *,
+    class_name: str | None = None,
+    direction: str | None = None,
+) -> bytes:
     try:
         if data.startswith(b"\xef\xbb\xbf"):
             text = data.decode("utf-8-sig")
@@ -318,25 +335,84 @@ def add_root_class(data: bytes, class_name: str) -> bytes:
     if not root_match:
         raise EpubError("XHTML document has no recognizable html root tag")
     root_tag = root_match.group(0)
-    class_match = CLASS_ATTRIBUTE_RE.search(root_tag)
-    if class_match:
-        classes = class_match.group(3).split()
-        if class_name in classes:
-            return data
-        replacement = (
-            root_tag[: class_match.start(3)]
-            + class_match.group(3)
-            + (" " if class_match.group(3) else "")
-            + class_name
-            + root_tag[class_match.end(3) :]
-        )
-    else:
-        replacement = root_tag[:-1] + f' class="{class_name}">'
+    replacement = root_tag
+    if class_name:
+        class_match = CLASS_ATTRIBUTE_RE.search(replacement)
+        if class_match:
+            classes = class_match.group(3).split()
+            if class_name not in classes:
+                replacement = (
+                    replacement[: class_match.start(3)]
+                    + class_match.group(3)
+                    + (" " if class_match.group(3) else "")
+                    + class_name
+                    + replacement[class_match.end(3) :]
+                )
+        else:
+            suffix = "/>" if replacement.endswith("/>") else ">"
+            replacement = replacement[: -len(suffix)] + f' class="{class_name}"' + suffix
+    if direction:
+        direction_match = DIR_ATTRIBUTE_RE.search(replacement)
+        if direction_match:
+            if direction_match.group(3).lower() != direction:
+                replacement = (
+                    replacement[: direction_match.start(3)]
+                    + direction
+                    + replacement[direction_match.end(3) :]
+                )
+        else:
+            suffix = "/>" if replacement.endswith("/>") else ">"
+            replacement = (
+                replacement[: -len(suffix)]
+                + f' dir="{direction}"'
+                + suffix
+            )
+    if replacement == root_tag:
+        return data
     return (
         text[: root_match.start()]
         + replacement
         + text[root_match.end() :]
     ).encode(encoding)
+
+
+def remove_legacy_direction_css(css_text: str) -> tuple[str, bool]:
+    """Remove only direction rules immediately owned by our legacy marker."""
+    updated = css_text
+    removed = False
+    while True:
+        marker = LEGACY_DIRECTION_COMMENT_RE.search(updated)
+        if not marker:
+            return updated, removed
+        rule = CSS_RULE_RE.search(updated, marker.end())
+        if not rule or updated[marker.end() : rule.start()].strip():
+            raise EpubError("legacy direction marker is not followed by its CSS rule")
+        selectors, declarations = rule.groups()
+        selector_list = [selector.strip() for selector in selectors.split(",")]
+        if not selector_list or not all(
+            re.fullmatch(
+                r"(?:html)?\.[A-Za-z_][A-Za-z0-9_-]*",
+                selector,
+                re.I,
+            )
+            for selector in selector_list
+        ):
+            raise EpubError("legacy direction marker has an unexpected selector")
+        stripped_declarations = DIRECTION_RE.sub("", declarations)
+        stripped_declarations = stripped_declarations.replace(";", "").strip()
+        if (
+            declaration_values(declarations, DIRECTION_RE) != {"ltr"}
+            or stripped_declarations
+        ):
+            raise EpubError("legacy direction marker has unexpected declarations")
+        start = marker.start()
+        if start > 0 and updated[start - 1] == "\n":
+            start -= 1
+        end = rule.end()
+        if end < len(updated) and updated[end] == "\n":
+            end += 1
+        updated = updated[:start] + updated[end:]
+        removed = True
 
 
 def selector_matches_class(
@@ -569,8 +645,41 @@ def audit_book(book: Book) -> Audit:
                 document_modes,
                 document_root_directions,
                 document_directions,
+                document_root_dir_attributes,
             ) = document_details(archive, content_members)
             css_cache: dict[str, tuple[str, str]] = {}
+            legacy_css_updates: dict[str, bytes] = {}
+            for css_member in sorted(
+                {
+                    member
+                    for linked_members in stylesheets.values()
+                    for member in linked_members
+                    if member in names
+                }
+            ):
+                css_text, encoding = decode_css(archive.read(css_member))
+                try:
+                    sanitized_css, removed = remove_legacy_direction_css(css_text)
+                except EpubError as error:
+                    return Audit(
+                        book,
+                        "unsupported",
+                        f"{css_member}: {error}",
+                        languages,
+                    )
+                css_cache[css_member] = (sanitized_css, encoding)
+                if removed:
+                    legacy_css_updates[css_member] = sanitized_css.encode(encoding)
+                if DIRECTION_RE.search(CSS_COMMENT_RE.sub("", sanitized_css)):
+                    return Audit(
+                        book,
+                        "unsupported",
+                        (
+                            f"{css_member} contains publisher-authored CSS direction; "
+                            "manual migration is required"
+                        ),
+                        languages,
+                    )
             for document in content_members:
                 root_classes = document_root_classes.get(document, set())
                 body_classes = document_body_classes.get(document, set())
@@ -600,32 +709,6 @@ def audit_book(book: Book) -> Audit:
                 document_modes.setdefault(document, set()).update(
                     root_modes | body_modes
                 )
-                root_directions = stylesheet_values_for_document(
-                    archive,
-                    document,
-                    root_classes,
-                    body_classes,
-                    stylesheets,
-                    DIRECTION_RE,
-                    css_cache,
-                    principal=True,
-                )
-                body_directions = stylesheet_values_for_document(
-                    archive,
-                    document,
-                    root_classes,
-                    body_classes,
-                    stylesheets,
-                    DIRECTION_RE,
-                    css_cache,
-                    principal=False,
-                )
-                document_root_directions.setdefault(document, set()).update(
-                    root_directions
-                )
-                document_directions.setdefault(document, set()).update(
-                    root_directions | body_directions
-                )
             if not vertical_hint and not rtl_spine:
                 return Audit(
                     book,
@@ -638,11 +721,9 @@ def audit_book(book: Book) -> Audit:
             stylesheet_for_mode: dict[str, str] = {}
             root_class_updates: dict[str, str] = {}
             vertical_documents: set[str]
-            direction_selectors: set[str]
 
             if classes["vrtl"]:
                 vertical_documents = set(classes["vrtl"])
-                direction_selectors = {"html.vrtl"}
                 modes = {"vrtl": ("vertical-rl", classes["vrtl"])}
                 for class_name, (expected, documents) in modes.items():
                     if not documents:
@@ -689,6 +770,98 @@ def audit_book(book: Book) -> Audit:
                     ):
                         missing_modes.append(class_name)
                         stylesheet_for_mode[class_name] = css_member
+                hybrid_root_documents: dict[str, set[str]] = {
+                    "vrtl": set(),
+                    "hltr": set(),
+                }
+                for document in content_members:
+                    if document in vertical_documents:
+                        continue
+                    vertical = document_has_mode(
+                        document,
+                        document_modes,
+                        "vertical-rl",
+                    )
+                    horizontal = document_has_mode(
+                        document,
+                        document_modes,
+                        "horizontal-tb",
+                    )
+                    if vertical and horizontal:
+                        return Audit(
+                            book,
+                            "unsupported",
+                            f"{document} has conflicting effective writing modes",
+                            languages,
+                        )
+                    if not vertical and not horizontal:
+                        continue
+                    expected = "vertical-rl" if vertical else "horizontal-tb"
+                    conflicting = "horizontal-tb" if vertical else "vertical-rl"
+                    if document_has_mode(
+                        document,
+                        document_root_modes,
+                        conflicting,
+                    ):
+                        return Audit(
+                            book,
+                            "unsupported",
+                            f"{document} has a conflicting XHTML root writing mode",
+                            languages,
+                        )
+                    class_name = "vrtl" if vertical else "hltr"
+                    if vertical:
+                        vertical_documents.add(document)
+                    if not document_has_mode(
+                        document,
+                        document_root_modes,
+                        expected,
+                    ):
+                        root_class_updates[document] = class_name
+                        hybrid_root_documents[class_name].add(document)
+
+                for class_name, hybrid_documents in hybrid_root_documents.items():
+                    if not hybrid_documents:
+                        continue
+                    hybrid_stylesheet = select_stylesheet(
+                        archive,
+                        hybrid_documents,
+                        stylesheets,
+                    )
+                    if not hybrid_stylesheet:
+                        return Audit(
+                            book,
+                            "unsupported",
+                            f"no shared stylesheet for hybrid {class_name} XHTML roots",
+                            languages,
+                        )
+                    if hybrid_stylesheet not in css_cache:
+                        css_cache[hybrid_stylesheet] = decode_css(
+                            archive.read(hybrid_stylesheet)
+                        )
+                    hybrid_css, _ = css_cache[hybrid_stylesheet]
+                    expected = (
+                        "vertical-rl"
+                        if class_name == "vrtl"
+                        else "horizontal-tb"
+                    )
+                    if not class_has_mode(
+                        hybrid_css,
+                        class_name,
+                        expected,
+                        principal=True,
+                    ):
+                        existing_target = stylesheet_for_mode.get(class_name)
+                        if existing_target and existing_target != hybrid_stylesheet:
+                            return Audit(
+                                book,
+                                "unsupported",
+                                f"hybrid {class_name} repairs span multiple stylesheets",
+                                languages,
+                            )
+                        if class_name not in missing_modes:
+                            missing_modes.append(class_name)
+                        stylesheet_for_mode[class_name] = hybrid_stylesheet
             else:
                 classed_documents = [
                     document
@@ -788,9 +961,6 @@ def audit_book(book: Book) -> Audit:
                         ):
                             missing_modes.append(class_name)
                             stylesheet_for_mode[class_name] = root_stylesheet
-
-                direction_selectors = {"html.vrtl"}
-
             if any(
                 document_has_direction(
                     document,
@@ -805,86 +975,18 @@ def audit_book(book: Book) -> Audit:
                     "vertical content has an explicit conflicting RTL inline direction",
                     languages,
                 )
-
-            prospective_root_classes = {
-                document: set(root_classes)
-                for document, root_classes in document_root_classes.items()
-            }
-            for document, class_name in root_class_updates.items():
-                prospective_root_classes.setdefault(document, set()).add(class_name)
-            prospective_root_directions = {
-                document: set(directions)
-                for document, directions in document_root_directions.items()
-            }
-            for document in root_class_updates:
-                prospective_root_directions.setdefault(document, set()).update(
-                    stylesheet_values_for_document(
-                        archive,
-                        document,
-                        prospective_root_classes.get(document, set()),
-                        document_body_classes.get(document, set()),
-                        stylesheets,
-                        DIRECTION_RE,
-                        css_cache,
-                        principal=True,
-                    )
-                )
-
-            direction_classes: set[str] = (
-                {"vrtl"} if classes["vrtl"] else set()
-            )
-            for document in vertical_documents:
-                if root_class_updates.get(document) == "vrtl":
-                    direction_classes.add("vrtl")
-                direction_classes.update(
-                    vertical_classes_for_document(
-                        archive,
-                        document,
-                        document_root_classes,
-                        stylesheets,
-                        css_cache,
-                        principal=True,
-                    )
-                )
-            if not direction_classes or any(
-                not CSS_CLASS_RE.fullmatch(class_name)
-                for class_name in direction_classes
-            ):
-                return Audit(
-                    book,
-                    "unsupported",
-                    "vertical XHTML root selector cannot be patched safely",
-                    languages,
-                )
-            direction_selectors = {
-                f"html.{class_name}" for class_name in direction_classes
-            }
-
-            missing_inline_direction = not all(
-                document_has_direction(
-                    document,
-                    prospective_root_directions,
-                    "ltr",
-                )
+            root_direction_updates = {
+                document
                 for document in vertical_documents
-            )
-            stylesheet_for_direction: str | None = None
-            if missing_inline_direction:
-                stylesheet_for_direction = select_stylesheet(
-                    archive, vertical_documents, stylesheets
-                )
-                if not stylesheet_for_direction:
-                    return Audit(
-                        book,
-                        "unsupported",
-                        "no shared stylesheet for vertical inline direction",
-                        languages,
-                    )
-
+                if document_root_dir_attributes.get(document) != "ltr"
+            }
             target_members = set(stylesheet_for_mode.values())
-            if stylesheet_for_direction:
-                target_members.add(stylesheet_for_direction)
-            if not target_members and not root_class_updates:
+            if (
+                not target_members
+                and not root_class_updates
+                and not root_direction_updates
+                and not legacy_css_updates
+            ):
                 return Audit(
                     book,
                     "ok",
@@ -901,9 +1003,7 @@ def audit_book(book: Book) -> Audit:
                     "required vertical repairs span multiple stylesheets",
                     languages,
                     tuple(missing_modes),
-                    tuple(sorted(direction_selectors))
-                    if missing_inline_direction
-                    else (),
+                    tuple(sorted(root_direction_updates)),
                 )
             target = target_members.pop() if target_members else None
             additions: list[str] = []
@@ -929,48 +1029,44 @@ def audit_book(book: Book) -> Audit:
                         "}",
                     ]
                 )
-            if target and missing_inline_direction:
-                # EPUB page progression stays RTL. LTR here means top-to-bottom
-                # along the inline axis of Japanese vertical text.
-                additions.extend(["", f"/* {DIRECTION_MARKER} */"])
-                selectors = sorted(direction_selectors)
-                for index, selector in enumerate(selectors):
-                    suffix = "," if index < len(selectors) - 1 else " {"
-                    additions.append(f"{selector}{suffix}")
-                additions.extend(["  direction: ltr;", "}"])
-            member_updates: dict[str, bytes] = {}
-            for document, class_name in root_class_updates.items():
-                member_updates[document] = add_root_class(
-                    archive.read(document), class_name
+            member_updates: dict[str, bytes] = dict(legacy_css_updates)
+            for document in sorted(
+                set(root_class_updates) | root_direction_updates
+            ):
+                member_updates[document] = update_root_attributes(
+                    member_updates.get(document, archive.read(document)),
+                    class_name=root_class_updates.get(document),
+                    direction="ltr" if document in root_direction_updates else None,
                 )
             if target:
                 if target not in css_cache:
                     css_cache[target] = decode_css(archive.read(target))
                 css_text, encoding = css_cache[target]
-                updated = css_text.rstrip() + "\n" + "\n".join(additions) + "\n"
+                updated = css_text
+                if additions:
+                    updated = css_text.rstrip() + "\n" + "\n".join(additions) + "\n"
                 member_updates[target] = updated.encode(encoding)
             reasons: list[str] = []
             if root_class_updates:
                 reasons.append("missing principal XHTML root writing modes")
             if missing_modes:
                 reasons.append("missing unprefixed root writing-mode rules")
-            if missing_inline_direction:
-                reasons.append("missing explicit top-to-bottom inline direction")
+            if root_direction_updates:
+                reasons.append("missing XHTML root dir=ltr")
+            if legacy_css_updates:
+                reasons.append("legacy generated CSS direction requires migration")
             return Audit(
                 book=book,
                 status="needs-fix",
                 reason=" and ".join(reasons),
                 internal_languages=languages,
                 missing_modes=tuple(missing_modes),
-                missing_direction_selectors=(
-                    tuple(sorted(direction_selectors))
-                    if missing_inline_direction
-                    else ()
-                ),
+                root_direction_updates=tuple(sorted(root_direction_updates)),
                 root_class_updates=tuple(
                     f"{document}={class_name}"
                     for document, class_name in sorted(root_class_updates.items())
                 ),
+                removed_legacy_direction_css=tuple(sorted(legacy_css_updates)),
                 css_member=target,
                 member_updates=member_updates,
             )
@@ -997,6 +1093,31 @@ def write_patched_epub(source: Path, destination: Path, updates: dict[str, bytes
         corrupt_member = check_archive.testzip()
         if corrupt_member:
             raise EpubError(f"patched EPUB ZIP CRC failure: {corrupt_member}")
+
+
+def validate_epub(path: Path) -> None:
+    executable = shutil.which("epubcheck")
+    jar_value = os.environ.get("EPUBCHECK_JAR")
+    if executable:
+        command = [executable, str(path)]
+    elif jar_value and Path(jar_value).expanduser().is_file():
+        command = [
+            "java",
+            "-jar",
+            str(Path(jar_value).expanduser().resolve()),
+            str(path),
+        ]
+    else:
+        raise EpubError(
+            "epubcheck is required before replacement; install the tracked "
+            "'epubcheck' package or set EPUBCHECK_JAR"
+        )
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        output = (result.stderr or result.stdout).strip()
+        if len(output) > 12000:
+            output = output[-12000:]
+        raise EpubError(f"EPUBCheck rejected {path.name}:\n{output}")
 
 
 def active_writer_reason() -> str | None:
@@ -1062,10 +1183,28 @@ def repair(library: Path, backup_root: Path, audits: list[Audit]) -> Path | None
 
     with tempfile.TemporaryDirectory(prefix="repair-japanese-epubs-") as temp_name:
         temp_dir = Path(temp_name)
-        prepared: list[tuple[Audit, Path, Path, dict[str, object]]] = []
+        prepared: list[
+            tuple[Audit, Path, Path, str, dict[str, object]]
+        ] = []
         for audit in targets:
+            original_hash = sha256(audit.book.path)
             patched = temp_dir / f"{audit.book.book_id}.epub"
             write_patched_epub(audit.book.path, patched, audit.member_updates)
+            staged_book = Book(
+                book_id=audit.book.book_id,
+                title=audit.book.title,
+                relative_dir=audit.book.relative_dir,
+                format_name=audit.book.format_name,
+                database_languages=audit.book.database_languages,
+                path=patched,
+            )
+            staged_audit = audit_book(staged_book)
+            if staged_audit.status != "ok":
+                raise EpubError(
+                    f"staged EPUB for book {audit.book.book_id} did not pass "
+                    f"semantic re-audit: {staged_audit.status}: {staged_audit.reason}"
+                )
+            validate_epub(patched)
             backup = backup_dir / safe_backup_name(audit.book)
             shutil.copy2(audit.book.path, backup)
             record: dict[str, object] = {
@@ -1073,27 +1212,42 @@ def repair(library: Path, backup_root: Path, audits: list[Audit]) -> Path | None
                 "title": audit.book.title,
                 "library_path": str(audit.book.path),
                 "backup_path": str(backup),
-                "original_sha256": sha256(audit.book.path),
+                "original_sha256": original_hash,
                 "patched_sha256": sha256(patched),
                 "stylesheet": audit.css_member,
                 "added_modes": list(audit.missing_modes),
                 "added_root_classes": list(audit.root_class_updates),
-                "added_top_to_bottom_selectors": list(
-                    audit.missing_direction_selectors
+                "added_top_to_bottom_root_attributes": list(
+                    audit.root_direction_updates
                 ),
+                "removed_legacy_direction_css": list(
+                    audit.removed_legacy_direction_css
+                ),
+                "epubcheck": "passed",
                 "replacement": "pending",
             }
             cast_books = manifest["books"]
             assert isinstance(cast_books, list)
             cast_books.append(record)
-            prepared.append((audit, patched, backup, record))
+            prepared.append((audit, patched, backup, original_hash, record))
 
         manifest_path = backup_dir / "manifest.json"
         manifest_path.write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )
 
-        for audit, patched, _backup, record in prepared:
+        for audit, patched, _backup, original_hash, record in prepared:
+            if sha256(audit.book.path) != original_hash:
+                record["replacement"] = "failed"
+                record["error"] = "source EPUB changed after staging"
+                manifest_path.write_text(
+                    json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+                    encoding="utf-8",
+                )
+                raise EpubError(
+                    f"refusing to replace book {audit.book.book_id}: "
+                    "source EPUB changed after staging"
+                )
             command = [
                 "calibredb",
                 f"--with-library={library}",
@@ -1126,16 +1280,22 @@ def print_audit(audit: Audit) -> None:
     detail = audit.reason
     if audit.missing_modes:
         detail += f" ({', '.join(audit.missing_modes)})"
-    if audit.missing_direction_selectors:
+    if audit.root_direction_updates:
         detail += (
-            " (top-to-bottom: "
-            + ", ".join(audit.missing_direction_selectors)
+            " (root dir=ltr: "
+            + ", ".join(audit.root_direction_updates)
             + ")"
         )
     if audit.root_class_updates:
         detail += (
             " (root classes: "
             + ", ".join(audit.root_class_updates)
+            + ")"
+        )
+    if audit.removed_legacy_direction_css:
+        detail += (
+            " (remove legacy direction CSS: "
+            + ", ".join(audit.removed_legacy_direction_css)
             + ")"
         )
     print(f"[{audit.status:11}] {audit.book.book_id:>4}  {audit.book.title} — {detail}")
@@ -1145,7 +1305,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Audit Japanese EPUBs in a Calibre library and conservatively add "
-            "missing writing-mode and top-to-bottom inline-direction rules."
+            "missing writing-mode rules and XHTML root direction attributes."
         )
     )
     parser.add_argument(
@@ -1159,6 +1319,12 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=DEFAULT_BACKUP_ROOT,
         help=f"backup directory root (default: {DEFAULT_BACKUP_ROOT})",
+    )
+    parser.add_argument(
+        "--book-id",
+        action="append",
+        type=int,
+        help="limit the audit/repair to a Calibre book ID (repeatable)",
     )
     parser.add_argument(
         "--fix",
@@ -1178,6 +1344,17 @@ def main() -> int:
         print(f"error: {error}", file=sys.stderr)
         return 2
 
+    if args.book_id:
+        selected_ids = set(args.book_id)
+        books = [book for book in books if book.book_id in selected_ids]
+        missing_ids = selected_ids - {book.book_id for book in books}
+        if missing_ids:
+            print(
+                "error: EPUB book ID(s) not found: "
+                + ", ".join(map(str, sorted(missing_ids))),
+                file=sys.stderr,
+            )
+            return 2
     audits = [audit_book(book) for book in books]
     for audit in audits:
         print_audit(audit)
