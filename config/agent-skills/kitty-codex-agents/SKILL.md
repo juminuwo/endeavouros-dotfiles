@@ -1,289 +1,134 @@
 ---
 name: kitty-codex-agents
-description: Use when spawning, monitoring, or coordinating Codex agents in kitty tabs with live user visibility and Hermes remote control. Prefer this over tmux for interactive spawned-agent workflows on Adrian's machine.
-license: MIT
-metadata:
-  hermes:
-    tags: [codex, kitty, agents, multi-agent, remote-control]
-    related_skills: [codex, hermes-agent]
+description: Spawn, monitor, and coordinate live-visible Codex coding agents in kitty tabs with Hermes remote control. Use when the user invokes kitty-codex-agents or asks to open, message, inspect, or coordinate Codex agents in kitty; prefer this workflow over tmux on Adrian's machine.
 ---
 
 # Kitty Codex Agents
 
-## Overview
+Keep the main Hermes tab as coordinator and run each Codex agent in a normal kitty tab that the user can watch, enter, and control. Prefer kitty over tmux unless the user asks for tmux or kitty remote control is unavailable.
 
-Use kitty tabs as the live control surface for spawned Codex agents. The main Hermes session remains the coordinator, while each Codex agent runs in a normal kitty tab the user can switch to, watch, and type into directly.
+Invoking this skill with a coding task means opening a new Codex tab immediately. Only skip launch when the user asks to inspect or monitor an existing tab.
 
-This workflow is preferred over tmux for this user. Use tmux only when the user explicitly asks for it or kitty remote control is unavailable.
+## Guardrails
 
-Core idea:
+- Default to one narrow author agent. Add one review agent only when the user asks or the change is risk-bearing: security/auth, permissions, state transitions, migrations, concurrency, destructive effects, or a wide cross-cutting diff.
+- Never spawn a dedicated test agent.
+- Never let agents repeat a full or broad suite. Share test commands and results in handoffs.
+- Give each author one git worktree. Put worktrees in a disk-backed sibling directory under `/home/howis/git`, never `/tmp`.
+- Do not let multiple agents edit the same checkout. A reviewer may inspect the author's worktree only after the author is idle and must return issues to the author rather than edit.
+- Keep every tab live-visible with `--hold`. Set a stable `--var hermes_agent=<agent-name>` and target that variable rather than the mutable tab title.
 
-```text
-main Hermes tab       = coordinator
-codex-auth tab        = Codex in repo/worktree A
-codex-ui tab          = Codex in repo/worktree B
-codex-tests tab       = Codex in repo/worktree C
-```
+## Start the Workflow
 
-Hermes can spawn the tabs, send messages into them, fetch their screen output, and verify filesystem/git/test results independently.
+1. Verify the control surface:
 
-## When to Use
+   ```bash
+   command -v kitty
+   kitty --version
+   command -v codex
+   codex --version
+   kitty @ ls
+   ```
 
-Use this skill when the user invokes `kitty-codex-agents` or asks to:
+2. Check resource headroom before creating a worktree or agent:
 
-- spawn a Codex agent
-- open a Codex agent in kitty
-- send a message to a Codex tab
-- check what a Codex tab is doing
-- coordinate multiple Codex agents
-- run live-visible coding agents without taking over the current Hermes session
+   ```bash
+   free -h
+   df -h /home/howis/git
+   ps -eo pid,rss,cmd --sort=-rss | head
+   ```
 
-User preference: invoking this skill means the user specifically wants a new Codex tab in the current kitty window for coding work. Do not treat the skill invocation as optional background context. Unless the user explicitly asks only to inspect/monitor an existing tab, immediately spawn a new interactive Codex tab before doing the coding work yourself.
+   Stop new agents and broad work when memory is low or swapping heavily, disk has less than 10 GiB or 10% free, an OOM kill occurred, or any command reports `ENOSPC`. Close completed agent tabs, clean eligible worktrees, and resume with a narrower task only after pressure clears. Use a larger disk reserve when the project's known build needs it.
 
-Default action on skill invocation:
+3. Resolve the repository and create the author's sibling worktree:
 
-1. Verify prerequisites with `command -v kitty`, `kitty --version`, `command -v codex`, `codex --version`, and `kitty @ ls`.
-2. Choose the working directory:
-   - If the user names a repo/worktree, use that path.
-   - Otherwise use the current repo when the current working directory is inside a git repository.
-   - If no git repo is available, create or choose an appropriate git worktree/repo before launching Codex.
-3. Launch an interactive Codex tab with a stable `--var hermes_agent=<agent-name>` and `--hold /usr/bin/codex`.
-4. Fetch the new tab screen with `kitty @ get-text` to check for startup/trust prompts.
-5. Send the user's coding task into the tab with `kitty @ send-text` plus `kitty @ send-key ... enter`.
-6. Continue as coordinator: poll Codex, inspect diffs directly, run tests directly, and report verified results.
+   ```bash
+   repo=/home/howis/git/my-project
+   agent_name=codex-auth
+   worktree_path=/home/howis/git/my-project-codex-auth
+   git -C "$repo" worktree add -b "codex/$agent_name" "$worktree_path" main
+   ```
 
-Do not use this for:
+   Reuse a clean existing worktree only when its branch and ownership match the task. Do not create scratch worktrees in `/tmp`.
 
-- quick hidden subtasks where `delegate_task` is enough, unless the user invoked this skill anyway; explicit invocation wins and should open a tab
-- scheduled/durable background jobs; use cron instead
-- non-interactive one-shot shell tasks that do not benefit from live visibility, unless the user invoked this skill anyway; explicit invocation wins and should open a tab
+4. Launch interactive Codex directly:
 
-## Prerequisites
+   ```bash
+   kitty @ launch --type=tab --tab-title "$agent_name" --var "hermes_agent=$agent_name" --cwd "$worktree_path" --env PATH=/home/howis/.local/bin:$PATH --hold /usr/bin/codex
+   ```
 
-Verify the tools and remote control before relying on the workflow:
+5. Fetch the screen to handle startup or trust prompts, then send the narrow task:
 
-```bash
-command -v kitty
-kitty --version
-command -v codex
-codex --version
-kitty @ ls
-```
+   ```bash
+   kitty @ get-text --match "var:hermes_agent=$agent_name" --extent screen
+   kitty @ send-text --match "var:hermes_agent=$agent_name" 'Implement the requested change. Stay within the assigned area and run focused changed-area tests only.'
+   kitty @ send-key --match "var:hermes_agent=$agent_name" enter
+   ```
 
-Expected:
-
-- `kitty @ ls` returns JSON describing the current kitty windows/tabs.
-- Codex runs inside a git repository. For scratch work, create a temporary git repo first.
-
-If `kitty @ ls` fails outside a kitty window, the environment may need `KITTY_LISTEN_ON` or a configured `listen_on` in `kitty.conf`. From inside an active kitty session, remote control normally works through the controlling terminal.
-
-## Naming and Targeting
-
-Always set a stable kitty user variable when launching an agent:
-
-```text
---var hermes_agent=<agent-name>
-```
-
-Use that variable for later targeting:
-
-```text
---match 'var:hermes_agent=<agent-name>'
-```
-
-Do not rely on tab titles alone. Titles can be changed by Codex, shell integration, prompts, or the user.
-
-Good names:
-
-```text
-codex-auth
-codex-ui
-codex-tests
-codex-review-123
-```
-
-## Spawn an Interactive Codex Tab
-
-Use this when the user wants a live Codex session they can enter and drive. This is the preferred path when the user says "spawn codex" — open the interactive TUI first, then send the task prompt with `send-text` + Enter.
+For a known one-shot task that still needs live visibility, use the same worktree and stable variable:
 
 ```bash
-kitty @ launch --type=tab --tab-title '<agent-name>' --var hermes_agent=<agent-name> --cwd <repo-path> --env PATH=/home/howis/.local/bin:$PATH --hold /usr/bin/codex
+kitty @ launch --type=tab --tab-title "$agent_name" --var "hermes_agent=$agent_name" --cwd "$worktree_path" --hold /usr/bin/codex exec --sandbox workspace-write '<concise prompt>'
 ```
 
-Example:
+Keep prompts concise. See `references/interactive-spawn-and-prompt.md` only when prompt handoff or trust-screen behavior needs troubleshooting.
+
+## Coordinate and Review
+
+Poll the visible screen without duplicating the agent's work:
 
 ```bash
-kitty @ launch --type=tab --tab-title codex-auth --var hermes_agent=codex-auth --cwd /home/howis/git/my-project --env PATH=/home/howis/.local/bin:$PATH --hold /usr/bin/codex
+kitty @ get-text --match "var:hermes_agent=$agent_name" --extent screen
 ```
 
-Notes:
+Use `--extent all` only when needed for scrolled-off context. Send follow-ups with `send-text` followed by `send-key ... enter`.
 
-- The command prints the new kitty window id.
-- Launch `/usr/bin/codex` directly for interactive tabs; avoid wrapping it as `zsh -lc 'exec codex'` unless a shell wrapper is specifically needed.
-- Include `/home/howis/.local/bin` in PATH so project tools such as `uv` are available to commands Codex runs.
-- `--hold` keeps the tab open after Codex exits so the final output is visible.
-- Codex may first ask whether the repository is trusted.
-- If the trust prompt appears, the user can answer in the tab, or Hermes can send the appropriate choice if instructed.
-- See `references/interactive-spawn-and-prompt.md` for a verified prompt-handoff recipe and pitfalls from a real test-run session.
-- See `references/invocation-means-launch.md` for the user-corrected rule that invoking this skill means opening a new Codex tab immediately, not merely considering the workflow.
-
-## Spawn a One-Shot Codex Task Tab
-
-Use this when the task is known up front but the user still wants live visibility:
+The coordinator owns scope, handoffs, resource checks, diff inspection, integration, and cleanup. Inspect repository state directly rather than relying only on an agent summary:
 
 ```bash
-kitty @ launch --type=tab --tab-title '<agent-name>' --var hermes_agent=<agent-name> --cwd <repo-path> --hold /usr/bin/codex exec --sandbox workspace-write '<prompt>'
+git -C "$worktree_path" status --short
+git -C "$worktree_path" diff --stat
+git -C "$worktree_path" diff
 ```
 
-For short prompts, direct quoting is fine:
+If risk warrants a reviewer, wait for the author to stop editing, then launch at most one review-only tab against the author's worktree. Tell it to inspect the diff, report concrete issues, and rerun only workflows tied to a suspected issue. Do not ask it for a general second implementation or another broad test pass.
+
+## Test Budget
+
+Use one shared test budget for the task:
+
+1. **Author:** run focused tests, type checks, or lint commands covering the changed area. Do not run the full suite by default.
+2. **Reviewer, only when warranted:** inspect the diff first. Rerun only issue-specific workflows needed to confirm or disprove a concrete concern.
+3. **Coordinator:** run at most one broader integration or full suite, and only at the merge or milestone boundary.
+
+Do not spawn test agents, repeat already-passing broad suites, or run broad checks concurrently. If repository policy requires the author to run a broad suite, that consumes the single broad-run budget; the coordinator does not repeat it. Recheck memory and disk before any broader run; skip or narrow it under pressure and report why.
+
+## Finish and Clean Up
+
+Before removing a completed worktree, confirm both conditions:
 
 ```bash
-kitty @ launch --type=tab --tab-title codex-auth --var hermes_agent=codex-auth --cwd /home/howis/git/my-project --hold /usr/bin/codex exec --sandbox workspace-write 'Fix the auth bug, run tests, and summarize the diff'
+git -C "$worktree_path" status --short
+worktree_head=$(git -C "$worktree_path" rev-parse HEAD)
+git -C "$repo" merge-base --is-ancestor "$worktree_head" main
 ```
 
-For complex prompts, avoid giant shell one-liners. Prefer writing the prompt to a temporary file and launching a small wrapper command that reads it:
+The first command must be empty and the second must succeed. If the work is dirty or unmerged, preserve the worktree and report it.
+
+After confirming clean and merged:
 
 ```bash
-prompt_file=$(mktemp)
-printf '%s\n' 'Fix the auth bug, run tests, and summarize the diff.' > "$prompt_file"
-kitty @ launch --type=tab --tab-title codex-auth --var hermes_agent=codex-auth --cwd /home/howis/git/my-project --env PROMPT_FILE="$prompt_file" --hold zsh -lc 'exec /usr/bin/codex exec --sandbox workspace-write - < "$PROMPT_FILE"'
+kitty @ close-window --match "var:hermes_agent=$agent_name"
+git -C "$repo" worktree remove "$worktree_path"
+git -C "$repo" worktree prune
 ```
 
-If quoting becomes fragile, create a short script file and launch the script instead of embedding the whole task in the `kitty @ launch` command.
+Use `git worktree remove`; never delete a worktree with `rm -rf`. Keep tabs open until their results have been captured unless the user asks to close them sooner.
 
-## Send a Message to a Codex Tab
+## Failure Modes
 
-Send text, then press Enter:
-
-```bash
-kitty @ send-text --match 'var:hermes_agent=<agent-name>' '<message>'
-kitty @ send-key --match 'var:hermes_agent=<agent-name>' enter
-```
-
-Example:
-
-```bash
-kitty @ send-text --match 'var:hermes_agent=codex-auth' 'Please run the auth tests now.'
-kitty @ send-key --match 'var:hermes_agent=codex-auth' enter
-```
-
-For multi-line messages, prefer sending a concise instruction or using the clipboard/user handoff. Long pasted prompts can be brittle in terminal UIs.
-
-## Fetch Output from a Codex Tab
-
-Fetch the current visible screen:
-
-```bash
-kitty @ get-text --match 'var:hermes_agent=<agent-name>' --extent screen
-```
-
-Fetch screen plus scrollback:
-
-```bash
-kitty @ get-text --match 'var:hermes_agent=<agent-name>' --extent all
-```
-
-Example:
-
-```bash
-kitty @ get-text --match 'var:hermes_agent=codex-auth' --extent screen
-```
-
-Use `screen` for quick status checks. Use `all` when you need prior context or final results that scrolled off screen.
-
-## Multi-Agent Coding Workflow
-
-For parallel coding work, isolate file edits with git worktrees:
-
-```bash
-git worktree add -b codex/auth /tmp/codex-auth main
-git worktree add -b codex/ui /tmp/codex-ui main
-git worktree add -b codex/tests /tmp/codex-tests main
-```
-
-Then spawn one Codex tab per worktree:
-
-```bash
-kitty @ launch --type=tab --tab-title codex-auth --var hermes_agent=codex-auth --cwd /tmp/codex-auth --hold zsh -lc 'exec codex'
-kitty @ launch --type=tab --tab-title codex-ui --var hermes_agent=codex-ui --cwd /tmp/codex-ui --hold zsh -lc 'exec codex'
-kitty @ launch --type=tab --tab-title codex-tests --var hermes_agent=codex-tests --cwd /tmp/codex-tests --hold zsh -lc 'exec codex'
-```
-
-Hermes should coordinate the agents:
-
-1. Assign one narrow task per tab.
-2. Poll tab output with `kitty @ get-text`.
-3. Send follow-ups with `kitty @ send-text` and `send-key enter`.
-4. Inspect git diffs directly from Hermes.
-5. Run tests directly from Hermes.
-6. Merge or cherry-pick useful work only after verification.
-
-Do not let multiple agents edit the same checkout unless the task is read-only.
-
-## Closing Agent Tabs
-
-The user can close tabs manually. If asked to close a tab from Hermes, target by variable:
-
-```bash
-kitty @ close-window --match 'var:hermes_agent=<agent-name>'
-```
-
-Only close tabs when the user asks or the task lifecycle clearly requires cleanup.
-
-## Common Pitfalls
-
-1. **Treating skill invocation as optional context.** For this user, invoking `kitty-codex-agents` alongside a coding request means: open a new Codex tab in the current kitty window first, then coordinate. Do not start implementing or debugging directly unless the user explicitly says not to spawn Codex.
-
-2. **Trust prompt blocks the first message.** Codex may ask whether the repository is trusted. Fetch the screen after spawning and handle the prompt before sending task instructions.
-
-2. **Matching by title is brittle.** Codex or shell integration may rename the tab/window. Always launch with `--var hermes_agent=<agent-name>` and match on that variable.
-
-3. **Editing the same checkout from multiple agents causes conflicts.** Use one git worktree per active coding agent.
-
-4. **Long prompt quoting breaks shell commands.** For complex prompts, write a temporary file or script instead of embedding a giant prompt in a single `zsh -lc` string.
-
-5. **`--hold` matters.** Without `--hold`, a one-shot task tab may close before the user can read final output.
-
-6. **Current Hermes session does not become the Codex session.** The Codex tab is independent. Hermes can send/read via kitty remote control, but the user can also interact directly.
-
-7. **Remote control may require kitty context.** `kitty @` is most reliable from inside an existing kitty window. Outside kitty, use `KITTY_LISTEN_ON` or configure `listen_on`.
-
-## Verification Checklist
-
-After setting up or using this workflow, verify:
-
-- [ ] `kitty @ ls` works.
-- [ ] Spawn command returns a kitty window id.
-- [ ] The new tab is visible in kitty.
-- [ ] `kitty @ get-text --match 'var:hermes_agent=<agent-name>' --extent screen` returns the Codex screen.
-- [ ] `kitty @ send-text` plus `kitty @ send-key ... enter` reaches Codex.
-- [ ] Codex replies and Hermes can fetch the reply.
-- [ ] For coding tasks, changes are isolated in a repo or worktree and verified with git diff/tests.
-
-## Proven Test Case
-
-This workflow was validated on Adrian's machine with:
-
-```text
-kitty 0.46.2
-codex-cli 0.131.0
-```
-
-A tab launched with:
-
-```bash
-kitty @ launch --type=tab --tab-title codex-test --var hermes_agent=codex-test --cwd /home/howis/git/endeavouros-dotfiles --hold zsh -lc 'exec codex'
-```
-
-Hermes then sent:
-
-```bash
-kitty @ send-text --match 'var:hermes_agent=codex-test' 'hi'
-kitty @ send-key --match 'var:hermes_agent=codex-test' enter
-```
-
-and fetched Codex's reply with:
-
-```bash
-kitty @ get-text --match 'var:hermes_agent=codex-test' --extent screen
-```
+- If `kitty @ ls` fails, verify the command runs inside kitty or use the configured `KITTY_LISTEN_ON`.
+- If Codex shows a trust prompt, handle it before sending the task.
+- If a title changes, continue matching `var:hermes_agent=<agent-name>`.
+- If quoting becomes fragile, shorten the prompt; do not build giant shell one-liners.
+- If resource pressure appears, stop broad work first, preserve useful state, and clean only worktrees proven clean and merged.

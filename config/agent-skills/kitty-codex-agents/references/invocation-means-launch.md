@@ -5,11 +5,11 @@ Session lesson: when Adrian invokes the `kitty-codex-agents` skill alongside a c
 Required behavior:
 
 1. Open a new interactive Codex tab in the current kitty window before doing the coding work yourself.
-2. Use the current repo/worktree unless the user names a different path.
+2. Use the named worktree, or create a disk-backed sibling worktree under `/home/howis/git`; never create it in `/tmp`.
 3. Set a stable kitty variable: `--var hermes_agent=<agent-name>`.
 4. Fetch the tab screen after launch to catch startup/trust prompts.
 5. Send the user's task into Codex with `kitty @ send-text` and `kitty @ send-key ... enter`.
-6. Continue as coordinator: poll the tab, inspect git diffs directly, run tests directly, and report verified results.
+6. Continue as coordinator: poll the tab, inspect git diffs directly, enforce the shared test budget, and report verified results.
 
 Pitfall this prevents:
 

@@ -6,9 +6,9 @@ Verified workflow on Adrian's machine:
 
 ```bash
 kitty @ launch --type=tab \
-  --tab-title codex-tests-interactive \
-  --var hermes_agent=codex-tests-interactive \
-  --cwd /home/howis/git/driver-shield \
+  --tab-title codex-auth-interactive \
+  --var hermes_agent=codex-auth-interactive \
+  --cwd /home/howis/git/driver-shield-codex-auth \
   --env PATH=/home/howis/.local/bin:$PATH \
   --hold \
   /usr/bin/codex
@@ -17,26 +17,26 @@ kitty @ launch --type=tab \
 Then verify the TUI is open:
 
 ```bash
-kitty @ get-text --match 'var:hermes_agent=codex-tests-interactive' --extent screen
+kitty @ get-text --match 'var:hermes_agent=codex-auth-interactive' --extent screen
 ```
 
 Then send the task prompt:
 
 ```bash
-kitty @ send-text --match 'var:hermes_agent=codex-tests-interactive' 'Run the full test suite for this repository using the documented command: uv run pytest. Do not modify files. Let the tests run to completion. Report the final pytest summary, including any failing tests or errors if present.'
-kitty @ send-key --match 'var:hermes_agent=codex-tests-interactive' enter
+kitty @ send-text --match 'var:hermes_agent=codex-auth-interactive' 'Implement the requested auth change in this worktree. Run only the focused auth tests and report the diff and test result.'
+kitty @ send-key --match 'var:hermes_agent=codex-auth-interactive' enter
 ```
 
 Monitor:
 
 ```bash
-kitty @ get-text --match 'var:hermes_agent=codex-tests-interactive' --extent all
+kitty @ get-text --match 'var:hermes_agent=codex-auth-interactive' --extent all
 ```
 
 Close only when the user asks:
 
 ```bash
-kitty @ close-window --match 'var:hermes_agent=codex-tests-interactive'
+kitty @ close-window --match 'var:hermes_agent=codex-auth-interactive'
 ```
 
 Pitfalls:
