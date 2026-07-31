@@ -112,7 +112,7 @@ alias vim='nvim'
 alias vi='nvim'
 
 # Default browser
-export BROWSER='zen-browser'
+export BROWSER='brave'
 export PATH="$HOME/.local/bin:$PATH"
 
 # Alias for default terminal

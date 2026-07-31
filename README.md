@@ -1,6 +1,6 @@
 # endeavouros-dotfiles
 
-Personal EndeavourOS (i3 + Kitty + zsh) configuration. Installed via [dotbot](https://github.com/anishathalye/dotbot) for symlinked configs, plus a small `host-install` script for systemd units that need to live in fixed system paths.
+Personal EndeavourOS (i3 + Kitty + zsh) configuration. Installed via [dotbot](https://github.com/anishathalye/dotbot) for user-owned symlinked configs, plus a small `host-install` script for configuration that needs to live in fixed system paths.
 
 ## Installation on a fresh machine
 
@@ -48,7 +48,11 @@ configures Hermes to read shared personal skills from
 
 ### `./host-install`
 
-Installs the systemd units that **can't** be symlinked because they need to live at fixed system paths. The unit files are sourced from `config/host/systemd/`.
+Installs configuration that needs root access or fixed system paths. Systemd unit files are sourced from `config/host/systemd/`; the Brave managed policy is linked from `config/brave/policies/managed/brave.json`.
+
+| Configuration | Installed to | Purpose |
+|---|---|---|
+| Brave managed policy | `/etc/brave/policies/managed/brave.json` | Replays the browser debloat policy |
 
 | Unit | Installed to | Purpose |
 |---|---|---|

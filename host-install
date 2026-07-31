@@ -2,6 +2,7 @@
 # Installs host-specific configuration that dotbot can't manage:
 #   - hardware-specific packages from config/host/packages-host-repo.txt
 #       (NVIDIA driver/CUDA, Intel microcode, etc. — varies per machine)
+#   - /etc/brave/policies/managed/brave.json                     (system, root)
 #   - /etc/systemd/system/drive-sync.{service,timer}            (system, root)
 #   - vendor paccache.timer enablement                           (system, root)
 #   - host-specific ~/.config/systemd/user/*.service/*.timer/*.target
@@ -15,6 +16,8 @@ BASEDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SYS_SRC="$BASEDIR/config/host/systemd/system"
 USER_SRC="$BASEDIR/config/host/systemd/user"
 USER_DST="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+BRAVE_POLICY_SRC="$BASEDIR/config/brave/policies/managed/brave.json"
+BRAVE_POLICY_DST="/etc/brave/policies/managed/brave.json"
 
 # shellcheck source=config/host/systemd/hermes-driver-shield-cutover.sh
 source "$BASEDIR/config/host/systemd/hermes-driver-shield-cutover.sh"
@@ -47,6 +50,14 @@ if [[ -s "$HOST_REPO_LIST" ]]; then
   say "Installing host-specific repo packages"
   grep -v '^#\|^$' "$HOST_REPO_LIST" | sudo pacman -S --needed --noconfirm -
 fi
+
+# ------------------------------------------------------------------
+# Brave managed policy — needs sudo
+# ------------------------------------------------------------------
+say "Linking Brave managed policy — sudo required"
+
+sudo install -d -m 755 "$(dirname "$BRAVE_POLICY_DST")"
+sudo ln -sfn "$BRAVE_POLICY_SRC" "$BRAVE_POLICY_DST"
 
 # ------------------------------------------------------------------
 # System units (drive-sync) — needs sudo

@@ -1,4 +1,5 @@
 # AUR packages
+brave-bin
 caffeine-ng
 calibre-bin
 cursor-bin
@@ -12,4 +13,3 @@ slack-desktop
 soundwire
 sunshine-bin
 xmousepasteblock
-zen-browser-bin
