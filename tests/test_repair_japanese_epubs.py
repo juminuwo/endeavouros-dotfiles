@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import importlib.util
+import struct
 import sys
 import tempfile
 import unittest
 import zipfile
+import zlib
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
@@ -57,17 +59,30 @@ def make_epub(
     <dc:identifier id="id">fixture</dc:identifier>
     <dc:title>Japanese root-mode fixture</dc:title>
     <dc:language>ja</dc:language>
-    <meta property="rendition:writing-mode">vertical-rl</meta>
+    <meta property="dcterms:modified">2026-08-01T00:00:00Z</meta>
   </metadata>
   <manifest>
     <item id="chapter" href="chapter.xhtml"
           media-type="application/xhtml+xml"/>{second_manifest}
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml"
+          properties="nav"/>
     <item id="style" href="style.css" media-type="text/css"/>
   </manifest>
   <spine page-progression-direction="rtl">
     <itemref idref="chapter"/>{second_spine}
   </spine>
 </package>
+"""
+    navigation = """<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"
+      xmlns:epub="http://www.idpf.org/2007/ops">
+  <head><title>Contents</title></head>
+  <body>
+    <nav epub:type="toc">
+      <ol><li><a href="chapter.xhtml">Fixture</a></li></ol>
+    </nav>
+  </body>
+</html>
 """
     second_chapter = f"""<?xml version="1.0" encoding="UTF-8"?>
 <html xmlns="http://www.w3.org/1999/xhtml"{second_root_attributes or ""}>
@@ -97,6 +112,7 @@ def make_epub(
         )
         archive.writestr("META-INF/container.xml", container)
         archive.writestr("content.opf", package)
+        archive.writestr("nav.xhtml", navigation)
         archive.writestr("chapter.xhtml", chapter)
         if second_root_attributes is not None:
             archive.writestr("chapter2.xhtml", second_chapter)
@@ -111,6 +127,41 @@ def make_epub(
     )
 
 
+def add_central_only_mimetype_extra(path: Path) -> bytes:
+    """Add an Info-ZIP Unicode path field only to mimetype's central entry."""
+    filename = b"mimetype"
+    payload = struct.pack("<BI", 1, zlib.crc32(filename)) + filename
+    extra = struct.pack("<HH", 0x7075, len(payload)) + payload
+    data = bytearray(path.read_bytes())
+    eocd_offset = data.rfind(b"PK\x05\x06")
+    if eocd_offset < 0:
+        raise AssertionError("fixture ZIP has no end-of-central-directory record")
+    central_size = struct.unpack_from("<I", data, eocd_offset + 12)[0]
+    central_offset = struct.unpack_from("<I", data, eocd_offset + 16)[0]
+    if data[central_offset : central_offset + 4] != b"PK\x01\x02":
+        raise AssertionError("fixture ZIP central directory is malformed")
+    filename_length = struct.unpack_from("<H", data, central_offset + 28)[0]
+    extra_length = struct.unpack_from("<H", data, central_offset + 30)[0]
+    if data[
+        central_offset + 46 : central_offset + 46 + filename_length
+    ] != filename:
+        raise AssertionError("mimetype is not the fixture's first central entry")
+    if extra_length:
+        raise AssertionError("fixture mimetype already has a central extra field")
+    insert_at = central_offset + 46 + filename_length
+    data[insert_at:insert_at] = extra
+    struct.pack_into("<H", data, central_offset + 30, len(extra))
+    struct.pack_into("<I", data, eocd_offset + len(extra) + 12, central_size + len(extra))
+    path.write_bytes(data)
+    return extra
+
+
+def local_extra_length(path: Path, member: str) -> int:
+    with zipfile.ZipFile(path) as archive:
+        offset = archive.getinfo(member).header_offset
+    return struct.unpack_from("<H", path.read_bytes(), offset + 28)[0]
+
+
 class JapaneseEpubRepairTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory(
@@ -120,6 +171,25 @@ class JapaneseEpubRepairTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
+
+    def test_rewrite_strips_central_only_mimetype_extra(self) -> None:
+        book = make_epub(self.temp_path / "central-extra.epub")
+        source_extra = add_central_only_mimetype_extra(book.path)
+
+        self.assertEqual(local_extra_length(book.path, "mimetype"), 0)
+        with zipfile.ZipFile(book.path) as archive:
+            self.assertEqual(archive.getinfo("mimetype").extra, source_extra)
+
+        patched = self.temp_path / "central-extra-patched.epub"
+        REPAIR.write_patched_epub(book.path, patched, {})
+
+        self.assertEqual(local_extra_length(patched, "mimetype"), 0)
+        with zipfile.ZipFile(patched) as archive:
+            mimetype = archive.getinfo("mimetype")
+            self.assertEqual(mimetype.extra, b"")
+            self.assertEqual(mimetype.compress_type, zipfile.ZIP_STORED)
+            self.assertEqual(archive.read(mimetype), b"application/epub+zip")
+        REPAIR.validate_epub(patched)
 
     def test_body_only_vertical_mode_gets_principal_root_repair(self) -> None:
         book = make_epub(self.temp_path / "body-only.epub")

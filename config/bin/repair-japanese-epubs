@@ -1087,6 +1087,11 @@ def write_patched_epub(source: Path, destination: Path, updates: dict[str, bytes
         with zipfile.ZipFile(destination, "w", allowZip64=True) as output_archive:
             output_archive.comment = input_archive.comment
             for info in infos:
+                if info.filename == "mimetype":
+                    # EPUB forbids extras on the mimetype ZIP header. zipfile
+                    # otherwise copies central-directory extras into the new
+                    # local header when an existing ZipInfo is reused.
+                    info.extra = b""
                 data = updates.get(info.filename, input_archive.read(info))
                 output_archive.writestr(info, data)
     with zipfile.ZipFile(destination) as check_archive:
