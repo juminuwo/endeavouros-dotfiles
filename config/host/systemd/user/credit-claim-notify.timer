@@ -1,0 +1,11 @@
+[Unit]
+Description=Retry pending credit-claim failure notifications
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+AccuracySec=30s
+Unit=credit-claim-notify.service
+
+[Install]
+WantedBy=timers.target

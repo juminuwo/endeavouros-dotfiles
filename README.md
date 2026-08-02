@@ -59,6 +59,7 @@ Installs configuration that needs root access or fixed system paths. Systemd uni
 | `drive-sync.{service,timer}` | `/etc/systemd/system/` | Weekly external drive rsync (Sundays 5am) |
 | `paccache.timer` | Vendor unit under `/usr/lib/systemd/system/` | Weekly pacman package-cache cleanup; enablement is replayed by `host-install` |
 | `credit-claim.{service,timer}` | `~/.config/systemd/user/` | Daily oneshot, starting at 10:10 and moving 30s later after each success |
+| `credit-claim-notify.{service,timer}` | `~/.config/systemd/user/` | Hermes Discord failure delivery with 15-minute pending retries |
 | `imoto-wiki-publish.{service,timer}` | `~/.config/systemd/user/` | Periodic Imoto wiki publish job |
 | `hermes-restic-backup.{service,timer}` | `~/.config/systemd/user/` | Encrypted restic backup of Hermes state and canonical agent skills |
 | `work.target` | `~/.config/systemd/user/` | Automatic group for work services |
@@ -220,7 +221,7 @@ endeavouros-dotfiles/
 These aren't run by any script — do them once per machine:
 
 - **Drive sync UUIDs**: edit `config/host/sync-drives.sh` and set `MAIN_UUID` / `BACKUP_UUID`. See `config/host/DRIVE-SYNC-SETUP.md`.
-- **Credit-claim**: drop the bearer token at `~/.config/credit-claim/token` and the target URL at `~/.config/credit-claim/api_url` (the script reads both from there). See `config/host/credit-claim/README.md`.
+- **Credit-claim**: runtime credentials, endpoint, page URL, dedicated headless Chrome profile, and private notification state stay under `~/.config/credit-claim/`. On an authentication rejection, the service refreshes the JWT once and retries once. Final failures are delivered to the existing Hermes Discord DM and retried every 15 minutes until confirmed. See `config/host/credit-claim/README.md`.
 - **Jellyfin**: data lives at `/opt/jellyfin/{config,cache}` and media at `/mnt/Main/Videos/`. Start with `cd config/host/jellyfin && docker compose up -d`.
 - **Calibre + Calibre-Web**: native Calibre owns `/mnt/Main/ebooks/calibre-library`; source files and Japanese EPUB repair backups remain under `/mnt/Main/ebooks/archive/`. The tracked Compose file is linked to `~/services/calibre-web/compose.yaml`, and persistent web state lives under `~/services/calibre-web/config/`. Run `repair-japanese-epubs` after importing Japanese EPUBs and follow `config/host/calibre-web/README.md` for repairs and service lifecycle.
 - **Laptop battery indicator**: uncomment the `[battery]` block in `config/i3/i3blocks.conf` (~line 144) — requires `acpi`.

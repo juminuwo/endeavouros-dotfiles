@@ -1,0 +1,9 @@
+[Unit]
+Description=Deliver pending credit-claim failure through Hermes Discord
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/howis/git/endeavouros-dotfiles/config/host/credit-claim/notify-failure.py
+TimeoutStartSec=60

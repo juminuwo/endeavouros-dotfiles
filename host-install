@@ -125,6 +125,7 @@ enable_user_units \
 say "Enabling user timers"
 enable_user_units \
   credit-claim.timer \
+  credit-claim-notify.timer \
   imoto-wiki-publish.timer
 
 say "Installing user units (hermes-restic-backup)"
