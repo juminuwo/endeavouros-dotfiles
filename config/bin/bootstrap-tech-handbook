@@ -15,6 +15,10 @@ die() {
   exit 1
 }
 
+warn() {
+  printf 'bootstrap-tech-handbook: warning: %s\n' "$*" >&2
+}
+
 origin_is_expected() {
   local origin="${1%.git}"
   origin="${origin%/}"
@@ -40,6 +44,35 @@ verify_checkout() {
     die "$DESTINATION has no origin remote"
   origin_is_expected "$origin" ||
     die "$DESTINATION origin is '$origin', expected GitHub repository $REPOSITORY"
+}
+
+check_remote_freshness() {
+  if ! command -v gh >/dev/null 2>&1; then
+    warn "GitHub CLI is unavailable; could not check whether $DESTINATION is current"
+    return
+  fi
+
+  local remote_head
+  if ! remote_head="$(
+    gh api "repos/$REPOSITORY/commits?per_page=1" --jq '.[0].sha' 2>/dev/null
+  )" || [[ -z "$remote_head" ]]; then
+    warn "could not check whether $DESTINATION is current with $REPOSITORY"
+    return
+  fi
+
+  if git -C "$DESTINATION" merge-base --is-ancestor "$remote_head" HEAD \
+    >/dev/null 2>&1; then
+    return
+  fi
+
+  local short_head="${remote_head:0:12}"
+  if git -C "$DESTINATION" cat-file -e "$remote_head^{commit}" 2>/dev/null; then
+    local missing
+    missing="$(git -C "$DESTINATION" rev-list --count "HEAD..$remote_head")"
+    warn "$DESTINATION is missing $missing commit(s) from the remote default branch; install will use the local checkout"
+  else
+    warn "$DESTINATION does not contain remote commit $short_head; it may be behind or diverged, and install will use the local checkout"
+  fi
 }
 
 remove_legacy_link() {
@@ -74,6 +107,8 @@ else
   gh repo clone "$REPOSITORY" "$DESTINATION"
   verify_checkout
 fi
+
+check_remote_freshness
 
 [[ -x "$DESTINATION/install" ]] ||
   die "$DESTINATION/install is missing or not executable; update the handbook checkout"

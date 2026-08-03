@@ -3,7 +3,7 @@ model_reasoning_effort = "high"
 approvals_reviewer = "user"
 sandbox_mode = "danger-full-access"
 approval_policy = "never"
-plan_mode_reasoning_effort = "xhigh"
+plan_mode_reasoning_effort = "high"
 [projects."/home/howis/git"]
 trust_level = "trusted"
 
@@ -78,7 +78,7 @@ trusted_hash = "sha256:e936b38e7d8237861544d2b508ebba101d019d1f242c8a577cfeca996
 
 [mcp_servers.chrome-devtools]
 command = "npx"
-args = ["-y", "chrome-devtools-mcp@latest", "--browserUrl=http://127.0.0.1:9222"]
+args = ["-y", "chrome-devtools-mcp@latest", "--autoConnect"]
 startup_timeout_sec = 30.0
 tool_timeout_sec = 120.0
 

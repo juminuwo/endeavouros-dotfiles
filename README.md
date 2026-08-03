@@ -24,7 +24,12 @@ Reads `config/packages-repo.txt` and `config/packages-aur.txt` and installs ever
 
 ### `./install` (dotbot)
 
-Driven by `install.conf.yaml`. It first ensures the private Imoto Labs engineering handbook exists at `~/git/tech-handbook`, cloning it with GitHub CLI when absent. Existing checkouts are never pulled or modified. A path collision or checkout with the wrong origin stops installation instead of overwriting local data.
+Driven by `install.conf.yaml`. It first ensures the private Imoto Labs
+engineering handbook exists at `~/git/tech-handbook`, cloning it with GitHub CLI
+when absent. Existing checkouts are never pulled or modified. The bootstrap
+checks the remote default branch and warns when the local checkout is behind or
+its freshness cannot be determined. A path collision or checkout with the wrong
+origin stops installation instead of overwriting local data.
 
 Dotbot then creates symlinks from `~` into `config/`, replacing any existing files at the destination (`relink: true`). Categories:
 
@@ -37,13 +42,12 @@ Dotbot then creates symlinks from `~` into `config/`, replacing any existing fil
 | User scripts in PATH | `~/bin/{clip-img,claude-notify}`, `~/.local/bin/{agents-dashboard,agents-dashboard-spawn,restore_i3_session,save_i3_session,soundwire-tray,backup-hermes-restic,hermes-notify-hook,dotfiles-autoupdate,services-workflow}` |
 | User systemd units | `~/.config/systemd/user/mmo-mouse-workspaces.service`; host install also copies host-specific user units such as `hermes-restic-backup.{service,timer}` |
 | Personal/global agent context | `~/.codex/AGENTS.md`, `~/git/AGENTS.md`, `~/git/CLAUDE.md` |
-| Shared Imoto Labs engineering guidance | `~/git/tech-handbook` plus its user-scoped setup skill |
+| Shared Imoto Labs engineering guidance | `~/git/tech-handbook` plus its user-scoped team skills |
 
-The handbook bootstrap invokes its idempotent installer, which exposes the
-team-owned `setup-imoto-project` skill at
-`~/.agents/skills/setup-imoto-project`. After symlinking, dotbot runs
-`git submodule update --init --recursive` to keep `dotbot/` itself current, then
-configures Hermes to read shared personal skills from
+The handbook bootstrap invokes its idempotent installer, which exposes every
+team-owned handbook skill under `~/.agents/skills/`. After symlinking, dotbot
+runs `git submodule update --init --recursive` to keep `dotbot/` itself current,
+then configures Hermes to read shared personal skills from
 `~/git/endeavouros-dotfiles/config/agent-skills` when `hermes` is installed.
 
 ### `./host-install`

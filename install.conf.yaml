@@ -5,11 +5,19 @@
 
 - shell:
   - [config/bin/bootstrap-tech-handbook, Ensuring Imoto Labs tech handbook checkout]
+  - [config/bin/install-koreader-config, Seeding portable KOReader settings]
 
 - clean: ['~']
 
 - link:
     ~/.config/nvim: config/nvim
+    ~/.config/environment.d/zz-default-apps.conf: config/environment.d/zz-default-apps.conf
+    ~/.config/mimeapps.list:
+      path: config/mimeapps.list
+      force: true
+    ~/.config/koreader/defaults.custom.lua:
+      path: config/koreader/defaults.custom.lua
+      force: true
     ~/.zshrc: config/zshrc
     ~/.config/i3: config/i3
     ~/.config/flameshot/flameshot.ini: config/flameshot/flameshot.ini
