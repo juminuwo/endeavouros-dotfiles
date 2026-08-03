@@ -1,0 +1,4 @@
+# Leaf Markdown viewer configuration
+
+# Open Ctrl+E at the first visible source line and center it in Neovim.
+editor = 'nvim +{$line} +"normal! zz"'

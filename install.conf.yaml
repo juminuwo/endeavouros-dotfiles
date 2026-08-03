@@ -17,6 +17,7 @@
     ~/.Xmodmap: config/Xmodmap
     ~/.config/kitty/kitty.conf: config/kitty.conf
     ~/.config/kitty/open-actions.conf: config/open-actions.conf
+    ~/.config/leaf/config.toml: config/leaf/config.toml
     ~/.config/yazi: config/yazi
     ~/.claude/settings.json: config/claude-settings.json
     ~/.claude/keybindings.json: config/claude-keybindings.json
