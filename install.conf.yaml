@@ -43,6 +43,7 @@
     ~/.claude/skills/kitty-codex-agents: config/agent-skills/kitty-codex-agents
     ~/.claude/skills/imoto-one-pagers: config/agent-skills/imoto-one-pagers
     ~/.claude/skills/dotfiles-autoupdate: config/agent-skills/dotfiles-autoupdate
+    ~/.claude/skills/job-market-tracker: config/agent-skills/job-market-tracker
     ~/.agents/skills/research-first: config/agent-skills/research-first
     ~/.agents/skills/tech-wiki: config/agent-skills/tech-wiki
     ~/.agents/skills/update-projects: config/agent-skills/update-projects
@@ -50,6 +51,7 @@
     ~/.agents/skills/kitty-codex-agents: config/agent-skills/kitty-codex-agents
     ~/.agents/skills/imoto-one-pagers: config/agent-skills/imoto-one-pagers
     ~/.agents/skills/dotfiles-autoupdate: config/agent-skills/dotfiles-autoupdate
+    ~/.agents/skills/job-market-tracker: config/agent-skills/job-market-tracker
     # Agents — legacy Claude reads markdown (.claude/agents/*.md), Codex reads TOML
     # (.codex/agents/*.toml). Formats differ, so we maintain both. The Codex
     # version is generated from the markdown source and must be regenerated

@@ -1,8 +1,7 @@
 [Unit]
-Description=Hermes Agent Gateway - Driver Shield API and optional Slack
-After=network-online.target driver-shield-main-demo.service
+Description=Hermes Agent Gateway - Messaging Platform Integration
+After=network-online.target
 Wants=network-online.target
-PartOf=work.target
 StartLimitIntervalSec=0
 
 [Service]
@@ -25,4 +24,4 @@ StandardOutput=journal
 StandardError=journal
 
 [Install]
-WantedBy=work.target
+WantedBy=default.target

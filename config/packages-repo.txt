@@ -211,3 +211,6 @@ gnome-keyring
 inxi
 mesa-utils
 downgrade
+android-tools
+android-udev
+anki

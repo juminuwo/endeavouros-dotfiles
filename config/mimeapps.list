@@ -20,6 +20,7 @@ x-scheme-handler/slack=slack.desktop
 application/epub+zip=rocks.koreader.KOReader.desktop
 application/vnd.comicbook+zip=rocks.koreader.KOReader.desktop
 application/x-cbz=rocks.koreader.KOReader.desktop
+application/x-trash=nvim.desktop
 
 [Added Associations]
 x-scheme-handler/http=brave-browser.desktop;
@@ -44,3 +45,5 @@ application/rtf=vim.desktop;
 application/epub+zip=rocks.koreader.KOReader.desktop;
 application/vnd.comicbook+zip=rocks.koreader.KOReader.desktop;
 application/x-cbz=rocks.koreader.KOReader.desktop;
+application/json=vim.desktop;
+application/x-trash=nvim.desktop;

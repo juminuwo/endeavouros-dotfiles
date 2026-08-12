@@ -1,0 +1,5 @@
+interface:
+  display_name: "Job Market Tracker"
+  short_description: "Collect, rank, and review matched UK ML roles"
+  brand_color: "#2563EB"
+  default_prompt: "Use $job-market-tracker to run the daily job scan and update my private dashboard."
