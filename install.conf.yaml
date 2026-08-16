@@ -84,6 +84,7 @@
     ~/.local/bin/project-status: config/bin/project-status
     ~/.local/bin/services-workflow: config/bin/services-workflow
     ~/.local/bin/repair-japanese-epubs: config/bin/repair-japanese-epubs
+    ~/.local/bin/sync-koreader-cbz-metadata: config/bin/sync-koreader-cbz-metadata
     ~/.local/bin/i3blocks-workspaces: config/bin/i3blocks-workspaces
     ~/.local/bin/i3-workspace-watcher: config/bin/i3-workspace-watcher
     ~/.config/picom/picom.conf: config/picom.conf

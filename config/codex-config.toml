@@ -1,5 +1,5 @@
-model = "gpt-5.6-sol"
-model_reasoning_effort = "high"
+model = "gpt-5.6-terra"
+model_reasoning_effort = "medium"
 approvals_reviewer = "user"
 sandbox_mode = "danger-full-access"
 approval_policy = "never"
@@ -56,6 +56,9 @@ trust_level = "trusted"
 trust_level = "trusted"
 
 [projects."/home/howis/git/nested-thumbnail-viewer"]
+trust_level = "trusted"
+
+[projects."/run/media/howis/PB632/applications/koreader/plugins/coverimage.koplugin"]
 trust_level = "trusted"
 
 [tui]

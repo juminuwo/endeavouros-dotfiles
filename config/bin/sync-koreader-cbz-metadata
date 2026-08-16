@@ -1,0 +1,201 @@
+#!/usr/bin/env python3
+"""Sync Calibre CBZ metadata into KOReader sidecars on a mounted reader.
+
+KOReader does not read ComicInfo.xml from CBZ archives.  It does honour
+custom_metadata.lua beside each book, while its Calibre plugin uses the device
+metadata.calibre cache.  This tool updates both from Calibre's metadata.db.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shutil
+import sqlite3
+import sys
+import tempfile
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+
+
+DEFAULT_LIBRARY = Path("/mnt/Main/ebooks/calibre-library")
+MANAGED_MARKER = "-- Managed by sync-koreader-cbz-metadata"
+
+
+@dataclass(frozen=True)
+class Book:
+    book_id: int
+    title: str
+    title_sort: str
+    authors: list[str]
+    author_sort: str
+    series: str | None
+    series_index: float
+    library_path: Path
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--device-root", type=Path, required=True,
+                        help="mounted reader root containing metadata.calibre")
+    parser.add_argument("--library", type=Path, default=DEFAULT_LIBRARY,
+                        help=f"Calibre library (default: {DEFAULT_LIBRARY})")
+    parser.add_argument("--apply", action="store_true",
+                        help="write changes; otherwise only report them")
+    parser.add_argument("--force", action="store_true",
+                        help="replace pre-existing sidecars not created by this tool")
+    parser.add_argument("--backup-root", type=Path,
+                        default=Path.home() / ".local/state/koreader-cbz-metadata-backups",
+                        help="backup root used with --apply")
+    return parser.parse_args()
+
+
+def require_within(root: Path, path: Path) -> Path:
+    resolved_root = root.resolve()
+    resolved_path = path.resolve()
+    if resolved_path != resolved_root and resolved_root not in resolved_path.parents:
+        raise ValueError(f"path escapes device root: {path}")
+    return resolved_path
+
+
+def load_books(database: Path, ids: set[int]) -> dict[int, Book]:
+    if not database.is_file():
+        raise FileNotFoundError(f"Calibre metadata database not found: {database}")
+    if not ids:
+        return {}
+    placeholders = ",".join("?" for _ in ids)
+    query = f"""
+        SELECT b.id, b.title, b.sort, b.author_sort, b.series_index, b.path,
+               s.name AS series
+        FROM books AS b
+        LEFT JOIN books_series_link AS bsl ON bsl.book = b.id
+        LEFT JOIN series AS s ON s.id = bsl.series
+        WHERE b.id IN ({placeholders})
+    """
+    with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
+        rows = connection.execute(query, tuple(sorted(ids))).fetchall()
+        books: dict[int, Book] = {}
+        for book_id, title, title_sort, author_sort, series_index, relative, series in rows:
+            authors = [row[0] for row in connection.execute(
+                """SELECT a.name FROM authors AS a
+                   JOIN books_authors_link AS bal ON bal.author = a.id
+                   WHERE bal.book = ? ORDER BY bal.id""", (book_id,)
+            )]
+            books[book_id] = Book(
+                book_id=book_id, title=title, title_sort=title_sort or title,
+                authors=authors, author_sort=author_sort or " & ".join(authors),
+                series=series, series_index=series_index,
+                library_path=database.parent / relative,
+            )
+    return books
+
+
+def lua_quote(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n") + '"'
+
+
+def sidecar_text(book: Book) -> str:
+    authors = " & ".join(book.authors)
+    fields = {
+        "title": book.title,
+        "authors": authors,
+        "series": book.series or "",
+        "series_index": str(book.series_index),
+        "language": "ja",
+    }
+    def table(name: str) -> list[str]:
+        lines = [f'    ["{name}"] = {{']
+        for key, value in fields.items():
+            rendered = value if key == "series_index" else lua_quote(value)
+            lines.append(f'        ["{key}"] = {rendered},')
+        lines.append("    },")
+        return lines
+    return "\n".join([MANAGED_MARKER, "return {", *table("doc_props"), *table("custom_props"), "}", ""])
+
+
+def atomic_write(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent,
+                                     prefix=f".{path.name}.", delete=False) as handle:
+        handle.write(content)
+        temp = Path(handle.name)
+    os.replace(temp, path)
+
+
+def backup(path: Path, destination: Path) -> None:
+    if path.exists():
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, destination)
+
+
+def run(args: argparse.Namespace) -> int:
+    device_root = args.device_root.resolve()
+    cache_path = require_within(device_root, device_root / "metadata.calibre")
+    if not cache_path.is_file():
+        raise FileNotFoundError(f"device metadata cache not found: {cache_path}")
+    with cache_path.open(encoding="utf-8") as handle:
+        cache = json.load(handle)
+    if not isinstance(cache, list):
+        raise ValueError("metadata.calibre must contain a JSON list")
+
+    candidates = [entry for entry in cache if str(entry.get("lpath", "")).lower().endswith(".cbz")]
+    ids = {entry.get("application_id") for entry in candidates if isinstance(entry.get("application_id"), int)}
+    books = load_books(args.library / "metadata.db", ids)
+    changed_cache = False
+    changed_sidecars: list[tuple[Path, Book]] = []
+    skipped: list[Path] = []
+
+    for entry in candidates:
+        book = books.get(entry.get("application_id"))
+        if not book:
+            continue
+        device_book = require_within(device_root, device_root / entry["lpath"])
+        if not device_book.is_file():
+            print(f"missing on device: {entry['lpath']}")
+            continue
+        expected = {
+            "title": book.title, "title_sort": book.title_sort,
+            "authors": book.authors, "author_sort": book.author_sort,
+            "series": book.series, "series_index": book.series_index,
+        }
+        if any(entry.get(key) != value for key, value in expected.items()):
+            entry.update(expected)
+            changed_cache = True
+        sidecar = device_book.with_suffix("").with_name(device_book.stem + ".sdr") / "custom_metadata.lua"
+        if sidecar.exists() and MANAGED_MARKER not in sidecar.read_text(encoding="utf-8", errors="replace") and not args.force:
+            skipped.append(sidecar)
+        elif not sidecar.exists() or sidecar.read_text(encoding="utf-8", errors="replace") != sidecar_text(book):
+            changed_sidecars.append((sidecar, book))
+
+    print(f"CBZs on device: {len(candidates)}; cache updates: {int(changed_cache)}; "
+          f"sidecars: {len(changed_sidecars)}; skipped manual sidecars: {len(skipped)}")
+    for path in skipped:
+        print(f"skipped manual sidecar: {path}")
+    if not args.apply:
+        print("Dry run only. Re-run with --apply to write changes.")
+        return 0
+
+    stamp = datetime.now().strftime("%Y%m%dT%H%M%S%z")
+    backup_dir = args.backup_root / stamp
+    backup(cache_path, backup_dir / "metadata.calibre")
+    if changed_cache:
+        atomic_write(cache_path, json.dumps(cache, ensure_ascii=False, indent=2) + "\n")
+    for target, book in changed_sidecars:
+        backup(target, backup_dir / "sidecars" / str(target.relative_to(device_root)))
+        atomic_write(target, sidecar_text(book))
+    print(f"Applied. Backups: {backup_dir}")
+    return 0
+
+
+def main() -> None:
+    try:
+        raise SystemExit(run(parse_args()))
+    except (OSError, ValueError, sqlite3.Error, json.JSONDecodeError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        raise SystemExit(1)
+
+
+if __name__ == "__main__":
+    main()
