@@ -327,6 +327,7 @@ def find_agent_tabs():
                     tab_info = {
                         "harness": harness,
                         "tab_id": tab["id"],
+                        "window_id": win.get("id"),
                         "cwd": cwd,
                         "jsonl": jsonl,
                         "session_id": sid,
@@ -436,9 +437,53 @@ def codex_session_summary(j: Path) -> dict:
         "last_user": last_user,
         "last_assistant": last_assistant,
         "last_tool": last_tool,
-        "last_recap": "",  # Codex has no away_summary equivalent today.
+        "last_recap": "",  # Codex recaps live in the TUI, not the rollout.
         "mtime": j.stat().st_mtime,
     }
+
+
+def codex_recap_from_text(text: str) -> str:
+    """Read the latest Codex recap cell from plain Kitty scrollback.
+
+    Rich mode has a ruled heading and indented, wrapped body; raw mode
+    has a plain heading. A blank line or the next cell ends the body.
+    """
+    lines = text.splitlines()
+    for index in range(len(lines) - 1, -1, -1):
+        heading = lines[index].strip()
+        rich = bool(re.fullmatch(r"─ Conversation recap(?: ─*)?", heading))
+        if not rich and heading != "Conversation recap":
+            continue
+        body = []
+        for line in lines[index + 1:]:
+            stripped = line.strip()
+            if not stripped:
+                if body:
+                    break
+                continue
+            if rich and not line.startswith("  "):
+                break
+            if stripped.startswith(("›", "─", "•", "■")):
+                break
+            body.append(stripped)
+        return " ".join(body)
+    return ""
+
+
+def codex_window_recap(window_id: int) -> str:
+    try:
+        result = subprocess.run(
+            kitty_cmd("get-text", "--match", f"id:{window_id}", "--extent", "all"),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=KITTY_TIMEOUT,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return ""
+    if result.returncode != 0:
+        return ""
+    return codex_recap_from_text(result.stdout)
 
 
 def _parse_hermes_log_timestamp(line: str) -> float | None:
@@ -692,6 +737,13 @@ def gather_sessions() -> list[dict]:
                 "mtime": time.time(),
             }
             fresh = True
+        if (
+            tab["harness"] == "codex"
+            and not fresh
+            and tab.get("window_id") is not None
+            and status_for(s["mtime"])[0] in ("idle", "stale")
+        ):
+            s["last_recap"] = codex_window_recap(tab["window_id"])
         project = Path(tab["cwd"]).name or tab["cwd"]
         if tab["harness"] == "hermes":
             project = s.get("title") or project

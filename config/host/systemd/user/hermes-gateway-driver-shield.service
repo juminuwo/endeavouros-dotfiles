@@ -11,6 +11,7 @@ WorkingDirectory=/home/howis/.hermes/profiles/driver-shield
 Environment="PATH=/home/howis/.hermes/hermes-agent/venv/bin:/home/howis/.hermes/hermes-agent/node_modules/.bin:/home/howis/.nvm/versions/node/v25.2.1/bin:/home/howis/.local/bin:/home/howis/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 Environment="VIRTUAL_ENV=/home/howis/.hermes/hermes-agent/venv"
 Environment="HERMES_HOME=/home/howis/.hermes/profiles/driver-shield"
+Environment="HERMES_SUPERVISED_CHILD=1"
 Restart=always
 RestartSec=5
 RestartForceExitStatus=75
@@ -19,7 +20,7 @@ KillMode=mixed
 KillSignal=SIGTERM
 ExecReload=/bin/kill -USR1 $MAINPID
 ExecStopPost=-/home/howis/.hermes/hermes-agent/venv/bin/python -m gateway.cgroup_cleanup
-TimeoutStopSec=60
+TimeoutStopSec=70
 StandardOutput=journal
 StandardError=journal
 
