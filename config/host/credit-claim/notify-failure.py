@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Deliver deduplicated credit-claim failures through Hermes Discord."""
+"""Deliver terminal credit-claim outcomes through Hermes Discord."""
 
 from __future__ import annotations
 
 import argparse
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -19,6 +20,9 @@ DEFAULT_SYSTEMCTL = "/usr/bin/systemctl"
 DEFAULT_TARGET = "discord:isitokaymimi"
 
 MESSAGES = {
+    "success": "Credits claimed successfully.",
+    "not-in-time": "Account is not eligible to claim yet. The next scheduled run will try again.",
+    "retries-exhausted": "Credit claim failed after all scheduled retries. The next daily run will try again.",
     "configuration-failed": (
         "Credit claim configuration is missing or unreadable.\n\n"
         "Check the private files under `~/.config/credit-claim/`, then run "
@@ -44,7 +48,7 @@ MESSAGES = {
         "Check `credit-claim.timer` before the next day."
     ),
     "unexpected-api-response": (
-        "Credit claim received an unexpected API result and stopped without retrying.\n\n"
+        "Credit claim received an unexpected API result and stopped.\n\n"
         "Inspect the local service status and claim log."
     ),
     "generic-failure": (
@@ -115,40 +119,70 @@ def systemd_property(systemctl: str, property_name: str) -> str | None:
 def current_failure(
     failure_path: Path, systemctl: str
 ) -> tuple[str, dict[str, object]] | None:
-    stored = read_json(failure_path)
+    """Recover legacy outcomes and abnormal exits; queued outcomes are authoritative."""
     invocation_id = systemd_property(systemctl, "InvocationID")
     active_state = systemd_property(systemctl, "ActiveState")
-
+    if active_state in {"active", "activating", "deactivating", "reloading"}:
+        return None
+    stored = read_json(failure_path)
     if active_state == "failed":
-        if stored:
-            category = stored.get("category")
-            stored_invocation = stored.get("invocation_id")
-            if (
-                category in MESSAGES
-                and invocation_id
-                and stored_invocation == invocation_id
-            ):
-                return str(category), stored
-
+        if stored and stored.get("category") in MESSAGES and invocation_id and stored.get("invocation_id") == invocation_id:
+            return str(stored["category"]), stored
+        # A pending record can survive a crash before failure.json is replaced.
+        for path in (failure_path.parent / "outcomes").glob("*.json"):
+            queued = read_json(path)
+            if queued and invocation_id and queued.get("invocation_id") == invocation_id and queued.get("category") in MESSAGES:
+                return str(queued["category"]), queued
         generic = {
-            "version": 1,
+            "version": 2,
             "invocation_id": invocation_id or "unknown",
             "category": "generic-failure",
         }
         atomic_write_json(failure_path, generic)
         return "generic-failure", generic
-
-    if stored:
-        category = stored.get("category")
-        stored_invocation = stored.get("invocation_id")
-        if category in MESSAGES and (
-            stored_invocation == "manual"
-            or not invocation_id
-            or stored_invocation == invocation_id
-        ):
-            return str(category), stored
-
+    if stored and stored.get("category") in MESSAGES:
+        if stored.get("version") == 2 or stored.get("invocation_id") == "manual" or not invocation_id or stored.get("invocation_id") == invocation_id:
+            return str(stored["category"]), stored
     return None
+
+
+def outcome_key(state: dict[str, object]) -> str:
+    invocation = state.get("invocation_id", "unknown")
+    # Old manual runs shared an ID. Include their timestamp when available.
+    identity = [invocation]
+    if invocation in {"manual", "unknown"}:
+        identity += [state.get("timestamp"), state.get("category")]
+    return hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+
+
+def terminal_message(category: str, state: dict[str, object]) -> str:
+    conditions = {
+        "success": "success",
+        "not-in-time": "not in time",
+        "retries-exhausted": "retries exhausted",
+        "configuration-failed": "configuration failure",
+        "claim-request-failed": "permanent request failure",
+        "login-required": "authentication failure",
+        "refreshed-token-rejected": "authentication failure",
+        "schedule-failed": "schedule failure after successful claim",
+        "unexpected-api-response": "unexpected API response",
+        "generic-failure": "service failure or timeout",
+    }
+    message = MESSAGES[category] + "\n\nStop condition: " + conditions[category] + "."
+    retries, attempts = state.get("retry_count"), state.get("attempts")
+    if type(retries) is int and 0 <= retries <= 3:
+        message += f"\nClaim retries: {retries}."
+    if type(attempts) is int and 0 <= attempts <= 5:
+        message += f" Total claim attempts: {attempts}."
+    status = state.get("http_status")
+    if isinstance(status, str) and len(status) == 3 and status.isascii() and status.isdigit() and status != "000":
+        message += f"\nLast HTTP status: {status}."
+    curl_status = state.get("curl_status")
+    if type(curl_status) is int and 0 < curl_status <= 99:
+        message += f"\nLast curl exit status: {curl_status}."
+    if category not in {"success", "not-in-time"}:
+        message += CHECKS
+    return message
 
 
 def send_message(hermes: str, target: str, subject: str, message: str) -> int:
@@ -187,31 +221,57 @@ def notify(config_dir: Path, hermes: str, systemctl: str, target: str) -> int:
     with lock_path.open("a", encoding="utf-8") as lock:
         os.chmod(lock_path, 0o600)
         fcntl.flock(lock, fcntl.LOCK_EX)
+        outcomes_dir = config_dir / "outcomes"
+        delivered_dir = config_dir / "delivered"
+        queued_keys = {
+            outcome_key(state)
+            for path in outcomes_dir.glob("*.json")
+            if (state := read_json(path)) and state.get("category") in MESSAGES
+        }
+        # Import a legacy outcome or abnormal termination into the durable queue.
         failure = current_failure(failure_path, systemctl)
-        if not failure:
-            return 0
-        category, state = failure
+        if failure:
+            category, state = failure
+            key = outcome_key(state)
+            notified = read_json(notified_path)
+            legacy_delivered = (
+                state.get("version") == 1 and notified
+                and notified.get("category") == category
+                and notified.get("invocation_id") == state.get("invocation_id")
+            )
+            if legacy_delivered:
+                atomic_write_json(delivered_dir / f"{key}.json", state)
+            elif key not in queued_keys and not (delivered_dir / f"{key}.json").exists():
+                atomic_write_json(outcomes_dir / f"{key}.json", state)
 
-        notified = read_json(notified_path)
-        if notified and notified.get("category") == category:
-            return 0
-
-        message = MESSAGES[category] + CHECKS
-        if send_message(
-            hermes, target, "[MAIN] Credit claim failed", message
-        ) != 0:
-            print("Credit-claim Discord notification delivery failed.", file=sys.stderr)
-            return 1
-
-        atomic_write_json(
-            notified_path,
-            {
-                "version": 1,
-                "category": category,
-                "invocation_id": state.get("invocation_id", "unknown"),
-            },
-        )
-        return 0
+        failed = False
+        seen = set()
+        for path in sorted(outcomes_dir.glob("*.json")):
+            state = read_json(path)
+            if not state or state.get("category") not in MESSAGES:
+                # Never send arbitrary data from corrupted or unknown records.
+                continue
+            category = str(state["category"])
+            key = outcome_key(state)
+            marker = delivered_dir / f"{key}.json"
+            if marker.exists():
+                path.unlink(missing_ok=True)
+                continue
+            if key in seen:
+                continue
+            seen.add(key)
+            subject = "[MAIN] Credit claim " + ("succeeded" if category == "success" else "stopped")
+            if send_message(hermes, target, subject, terminal_message(category, state)) != 0:
+                print("Credit-claim Discord notification delivery failed.", file=sys.stderr)
+                failed = True
+                break
+            # Retain small per-invocation receipts so failure.json or delayed
+            # duplicate queue writes cannot cause another notification.
+            receipt = {"version": 2, "category": category, "invocation_id": state.get("invocation_id", "unknown")}
+            atomic_write_json(marker, receipt)
+            atomic_write_json(notified_path, receipt)
+            path.unlink(missing_ok=True)
+        return 1 if failed else 0
 
 
 def parse_args() -> argparse.Namespace:
@@ -238,7 +298,7 @@ def main() -> int:
             hermes,
             target,
             "[MAIN] Credit claim notifications enabled",
-            "Test successful. Credit-claim failures will be delivered here through Hermes. No action is required.",
+            "Test successful. Terminal credit-claim outcomes will be delivered here through Hermes. No action is required.",
         )
     return notify(config_dir, hermes, systemctl, target)
 

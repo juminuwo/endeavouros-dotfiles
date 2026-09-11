@@ -1,8 +1,9 @@
 [Unit]
 Description=Daily credit claim
+OnSuccess=credit-claim-notify.service
 OnFailure=credit-claim-notify.service
 
 [Service]
 Type=oneshot
 ExecStart=/home/howis/git/endeavouros-dotfiles/config/host/credit-claim/claim.sh
-TimeoutStartSec=120
+TimeoutStartSec=65min

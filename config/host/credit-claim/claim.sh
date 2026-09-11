@@ -12,7 +12,7 @@ LOG_FILE="$CONFIG_DIR/claim.log"
 LOCK_FILE="$CONFIG_DIR/claim.lock"
 NOTIFY_LOCK_FILE="$CONFIG_DIR/notification.lock"
 FAILURE_FILE="$CONFIG_DIR/failure.json"
-NOTIFIED_FILE="$CONFIG_DIR/notified.json"
+OUTCOMES_DIR="$CONFIG_DIR/outcomes"
 REFRESH_SCRIPT=${CREDIT_CLAIM_REFRESH_SCRIPT:-"$SCRIPT_DIR/refresh-token.mjs"}
 TIMER_NAME="credit-claim.timer"
 TIMER_DROPIN_DIR="$HOME/.config/systemd/user/$TIMER_NAME.d"
@@ -20,6 +20,15 @@ TIMER_OVERRIDE="$TIMER_DROPIN_DIR/schedule.conf"
 DEFAULT_TIMER_TIME="10:10:00"
 SUCCESS_DELAY_SECONDS=30
 TEMP_FILES=()
+RETRY_DELAYS=(300 900 1800)
+RETRY_COUNT=0
+ATTEMPTS=0
+CURL_STATUS=0
+HTTP_STATUS=000
+RUN_ID=${INVOCATION_ID:-}
+if [[ ! "$RUN_ID" =~ ^[A-Fa-f0-9]{32}$ ]]; then
+    RUN_ID=$(tr -d '-' < /proc/sys/kernel/random/uuid)
+fi
 
 cleanup() {
     if [ "${#TEMP_FILES[@]}" -gt 0 ]; then
@@ -37,56 +46,47 @@ if ! exec 8>"$NOTIFY_LOCK_FILE" || ! chmod 600 "$NOTIFY_LOCK_FILE"; then
     exit 1
 fi
 
-record_failure() {
-    local category=$1 invocation_id timestamp tmp_file
-
+# One durable terminal record per invocation; intermediate errors never notify.
+record_outcome() {
+    local category=$1 timestamp tmp_file status
     case "$category" in
-        configuration-failed|claim-request-failed|login-required|refreshed-token-rejected|schedule-failed|unexpected-api-response)
-            ;;
-        *)
-            category=generic-failure
-            ;;
+        success|not-in-time|retries-exhausted|configuration-failed|claim-request-failed|login-required|refreshed-token-rejected|schedule-failed|unexpected-api-response) ;;
+        *) category=generic-failure ;;
     esac
-    invocation_id=${INVOCATION_ID:-manual}
-    if [[ ! "$invocation_id" =~ ^[A-Fa-f0-9]{32}$ ]]; then
-        invocation_id=manual
-    fi
     timestamp=$(date -Iseconds)
-
+    status=$HTTP_STATUS
+    [[ "$status" =~ ^[0-9]{3}$ ]] || status=000
     flock 8
-    if ! tmp_file=$(mktemp "$CONFIG_DIR/.failure.XXXXXX"); then
+    if ! mkdir -p -m 700 "$OUTCOMES_DIR"; then
         flock -u 8
-        echo "$timestamp ERROR: Could not create failure notification state." >> "$LOG_FILE"
         return 1
     fi
-    chmod 600 "$tmp_file"
-    if ! printf '{"version":1,"invocation_id":"%s","category":"%s","timestamp":"%s"}\n' \
-        "$invocation_id" "$category" "$timestamp" > "$tmp_file" \
-        || ! mv "$tmp_file" "$FAILURE_FILE"; then
+    tmp_file=$(mktemp "$CONFIG_DIR/.outcome.XXXXXX") || { flock -u 8; return 1; }
+    if ! printf '{"version":2,"invocation_id":"%s","category":"%s","timestamp":"%s","retry_count":%d,"attempts":%d,"http_status":"%s","curl_status":%d}\n' \
+        "$RUN_ID" "$category" "$timestamp" "$RETRY_COUNT" "$ATTEMPTS" "$status" "$CURL_STATUS" > "$tmp_file" \
+        || ! mv "$tmp_file" "$OUTCOMES_DIR/$RUN_ID.json"; then
         rm -f "$tmp_file"
         flock -u 8
-        echo "$timestamp ERROR: Could not install failure notification state." >> "$LOG_FILE"
         return 1
     fi
-    flock -u 8
-}
-
-clear_failure_state() {
-    flock 8
-    if ! rm -f "$FAILURE_FILE" "$NOTIFIED_FILE"; then
-        echo "$(date -Iseconds) WARNING: Could not clear failure notification state." >> "$LOG_FILE"
+    # Compatibility snapshot; queued outcomes survive subsequent runs.
+    tmp_file=$(mktemp "$CONFIG_DIR/.outcome.XXXXXX") || { flock -u 8; return 1; }
+    if ! cp "$OUTCOMES_DIR/$RUN_ID.json" "$tmp_file" || ! mv "$tmp_file" "$FAILURE_FILE"; then
+        rm -f "$tmp_file"
+        flock -u 8
+        return 1
     fi
     flock -u 8
 }
 
 if ! exec 9>"$LOCK_FILE"; then
     echo "$(date -Iseconds) ERROR: Could not open claim lock." >> "$LOG_FILE"
-    record_failure configuration-failed || true
+    record_outcome configuration-failed || true
     exit 1
 fi
 if ! chmod 600 "$LOCK_FILE"; then
     echo "$(date -Iseconds) ERROR: Could not secure claim lock." >> "$LOG_FILE"
-    record_failure configuration-failed || true
+    record_outcome configuration-failed || true
     exit 1
 fi
 flock -n -E 75 9
@@ -97,7 +97,7 @@ if [ "$lock_status" -eq 75 ]; then
 fi
 if [ "$lock_status" -ne 0 ]; then
     echo "$(date -Iseconds) ERROR: Could not acquire claim lock." >> "$LOG_FILE"
-    record_failure configuration-failed || true
+    record_outcome configuration-failed || true
     exit 1
 fi
 
@@ -199,39 +199,44 @@ delay_timer_after_success() {
 
 if [ ! -f "$TOKEN_FILE" ] || [ ! -r "$TOKEN_FILE" ] || [ ! -s "$TOKEN_FILE" ]; then
     echo "$(date -Iseconds) ERROR: Token file is missing, unreadable, or empty at $TOKEN_FILE" >> "$LOG_FILE"
-    record_failure configuration-failed || true
+    record_outcome configuration-failed || true
     exit 1
 fi
 
 if [ ! -f "$URL_FILE" ] || [ ! -r "$URL_FILE" ] || [ ! -s "$URL_FILE" ]; then
     echo "$(date -Iseconds) ERROR: URL file is missing, unreadable, or empty at $URL_FILE" >> "$LOG_FILE"
-    record_failure configuration-failed || true
+    record_outcome configuration-failed || true
     exit 1
 fi
 
 if ! URL=$(cat "$URL_FILE") || [ -z "$URL" ]; then
     echo "$(date -Iseconds) ERROR: Could not read a non-empty API URL." >> "$LOG_FILE"
-    record_failure configuration-failed || true
+    record_outcome configuration-failed || true
     exit 1
 fi
 
 perform_claim() {
-    local token curl_err response_file curl_status
+    local token curl_err response_file
+    HTTP_STATUS=000
+    CURL_STATUS=0
+    RESPONSE=
+    CODE=
+    MSG=
 
     if ! token=$(cat "$TOKEN_FILE") || [ -z "$token" ]; then
         echo "$(date -Iseconds) ERROR: Could not read a non-empty token." >> "$LOG_FILE"
         return 2
     fi
-    curl_err=$(mktemp)
-    response_file=$(mktemp)
+    curl_err=$(mktemp) || return 2
+    response_file=$(mktemp) || { rm -f "$curl_err"; return 2; }
     TEMP_FILES=("$curl_err" "$response_file")
     HTTP_STATUS=$(printf 'header = "Authorization: Bearer %s"\n' "$token" \
-        | curl --config - -sS -o "$response_file" -w "%{http_code}" -X POST "$URL" \
+        | curl --connect-timeout 20 --max-time 100 --config - -sS -o "$response_file" -w "%{http_code}" -X POST "$URL" \
             -H "Content-Type: application/json" 2>"$curl_err")
-    curl_status=$?
+    CURL_STATUS=$?
     RESPONSE=$(cat "$response_file")
 
-    if [ "$curl_status" -ne 0 ]; then
+    if [ "$CURL_STATUS" -ne 0 ]; then
         echo "$(date -Iseconds) ERROR: curl failed: $(cat "$curl_err")" >> "$LOG_FILE"
         rm -f "$curl_err" "$response_file"
         TEMP_FILES=()
@@ -240,11 +245,24 @@ perform_claim() {
     rm -f "$curl_err" "$response_file"
     TEMP_FILES=()
 
-    CODE=$(echo "$RESPONSE" | grep -o '"code":[0-9]*' | head -1 | cut -d: -f2)
-    MSG=$(echo "$RESPONSE" | grep -o '"msg":"[^"]*"' | head -1 | cut -d'"' -f4)
-    if [ -z "$MSG" ]; then
-        MSG=$(echo "$RESPONSE" | grep -o '"Error":"[^"]*"' | head -1 | cut -d'"' -f4)
-    fi
+    # Parse the envelope, including whitespace, without trusting an arbitrary
+    # nested code or a success-looking body on a failed HTTP response.
+    local fields
+    fields=$(printf '%s' "$RESPONSE" | python3 -c '
+import json, sys
+try:
+    value = json.load(sys.stdin)
+    if not isinstance(value, dict): raise ValueError()
+    code = value.get("code")
+    msg = value.get("msg", value.get("Error", ""))
+    print(code if type(code) is int else "")
+    print(msg.replace("\n", " ").replace("\r", " ") if isinstance(msg, str) else "")
+except (ValueError, TypeError):
+    print("")
+')
+    CODE=${fields%%$'\n'*}
+    if [[ "$fields" == *$'\n'* ]]; then MSG=${fields#*$'\n'}; fi
+
 }
 
 is_auth_rejection() {
@@ -257,64 +275,71 @@ log_result() {
     echo "$(date -Iseconds) attempt=$attempt http=$HTTP_STATUS code=$CODE msg=$MSG" >> "$LOG_FILE"
 }
 
-perform_claim
-claim_status=$?
-if [ "$claim_status" -ne 0 ]; then
-    if [ "$claim_status" -eq 2 ]; then
-        record_failure configuration-failed || true
-    else
-        record_failure claim-request-failed || true
-    fi
-    exit 1
-fi
-log_result initial
-
-if is_auth_rejection; then
-    echo "$(date -Iseconds) INFO: Token rejected; attempting one headless refresh." >> "$LOG_FILE"
-    refresh_output=$(node "$REFRESH_SCRIPT" 2>&1)
-    refresh_status=$?
-    if [ -n "$refresh_output" ]; then
-        while IFS= read -r line; do
-            echo "$(date -Iseconds) refresh: $line" >> "$LOG_FILE"
-        done <<< "$refresh_output"
-    fi
-    if [ "$refresh_status" -ne 0 ]; then
-        echo "$(date -Iseconds) WARNING: Headless refresh failed; visible Chrome login may be required." >> "$LOG_FILE"
-        record_failure login-required || true
-        exit 1
-    fi
-
+# Approved 2026-09-11: bounded 522 retries accept the uncertain POST outcome,
+# relying on the observed server cooldown. Other ambiguous failures stay daily.
+refresh_used=0
+while true; do
+    ATTEMPTS=$((ATTEMPTS + 1))
     perform_claim
     claim_status=$?
-    if [ "$claim_status" -ne 0 ]; then
-        if [ "$claim_status" -eq 2 ]; then
-            record_failure configuration-failed || true
-        else
-            record_failure claim-request-failed || true
+    log_result "$ATTEMPTS"
+    if [ "$claim_status" -eq 2 ]; then
+        record_outcome configuration-failed
+        exit 1
+    fi
+
+    if { [ "$claim_status" -eq 1 ] && [[ "$CURL_STATUS" =~ ^(5|6|7)$ ]]; } \
+        || { [ "$claim_status" -eq 0 ] && [ "$HTTP_STATUS" = 522 ]; }; then
+        if [ "$RETRY_COUNT" -ge "${#RETRY_DELAYS[@]}" ]; then
+            record_outcome retries-exhausted
+            exit 1
         fi
+        delay=${RETRY_DELAYS[$RETRY_COUNT]}
+        RETRY_COUNT=$((RETRY_COUNT + 1))
+        echo "$(date -Iseconds) INFO: transient failure; retry=$RETRY_COUNT wait_seconds=$delay" >> "$LOG_FILE"
+        sleep "$delay" || { record_outcome generic-failure; exit 1; }
+        continue
+    fi
+    if [ "$claim_status" -ne 0 ]; then
+        record_outcome claim-request-failed
         exit 1
     fi
-    log_result retry
+
     if is_auth_rejection; then
-        echo "$(date -Iseconds) WARNING: Refreshed token was rejected; not retrying again." >> "$LOG_FILE"
-        record_failure refreshed-token-rejected || true
-        exit 1
+        if [ "$refresh_used" -eq 1 ]; then
+            record_outcome refreshed-token-rejected
+            exit 1
+        fi
+        refresh_used=1
+        echo "$(date -Iseconds) INFO: Token rejected; attempting one headless refresh." >> "$LOG_FILE"
+        refresh_output=$(node "$REFRESH_SCRIPT" 2>&1)
+        refresh_status=$?
+        if [ -n "$refresh_output" ]; then
+            while IFS= read -r line; do
+                echo "$(date -Iseconds) refresh: $line" >> "$LOG_FILE"
+            done <<< "$refresh_output"
+        fi
+        if [ "$refresh_status" -ne 0 ]; then
+            record_outcome login-required
+            exit 1
+        fi
+        continue
     fi
-fi
 
-if [ "$CODE" = "400" ] && [ "$MSG" = "not in time" ]; then
-    clear_failure_state
-    exit 0
-fi
-
-if [ "$CODE" = "200" ]; then
-    if delay_timer_after_success "$RESPONSE"; then
-        clear_failure_state
-        exit 0
+    if [[ "$HTTP_STATUS" =~ ^2[0-9]{2}$ ]]; then
+        if [ "$CODE" = 400 ] && [ "$MSG" = 'not in time' ]; then
+            record_outcome not-in-time
+            exit $?
+        fi
+        if [ "$CODE" = 200 ]; then
+            if delay_timer_after_success "$RESPONSE"; then
+                record_outcome success
+                exit $?
+            fi
+            record_outcome schedule-failed
+            exit 1
+        fi
     fi
-    record_failure schedule-failed || true
+    record_outcome unexpected-api-response
     exit 1
-fi
-
-record_failure unexpected-api-response || true
-exit 1
+done

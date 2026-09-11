@@ -38,6 +38,8 @@ for arg in "$@"; do
             ;;
     esac
 done
+[[ " $* " == *" --connect-timeout 20 "* ]] || exit 98
+[[ " $* " == *" --max-time 100 "* ]] || exit 98
 output=
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -45,7 +47,7 @@ while [ "$#" -gt 0 ]; do
             output=$2
             shift 2
             ;;
-        -w|-X|-H)
+        -w|-X|-H|--connect-timeout|--max-time)
             shift 2
             ;;
         *)
@@ -85,6 +87,30 @@ case "$CREDIT_CLAIM_TEST_SCENARIO:$count" in
     retry-auth:2)
         status=403
         response='{"Error":"authentication rejected again"}'
+        ;;
+    transient-success:1|transient-cooldown:1|exhausted:*|mixed:1|mixed:3|mixed-auth-fails:1|mixed-auth-fails:3)
+        status=522
+        response=''
+        ;;
+    transient-success:2|mixed:4|dns-success:2|connect-success:2|proxy-success:2)
+        status=200
+        response='{"code": 200, "msg": "success"}'
+        ;;
+    transient-cooldown:2)
+        status=200
+        response='{"code": 400, "msg": "not in time"}'
+        ;;
+    mixed:2|mixed-auth-fails:2|mixed-auth-fails:4)
+        status=401
+        response=''
+        ;;
+    dns-success:1) exit 6 ;;
+    connect-success:1) exit 7 ;;
+    proxy-success:1) exit 5 ;;
+    excluded-timeout:*) exit 28 ;;
+    misleading-success:*)
+        status=500
+        response='{"code":200,"msg":"success"}'
         ;;
     curl-fails:*)
         echo 'simulated network failure' >&2
@@ -126,6 +152,18 @@ if [ "$CREDIT_CLAIM_TEST_SCENARIO" = timer-update-fails ] \
 fi
 echo "$*" >> "$CREDIT_CLAIM_TEST_STATE/systemctl-calls"
 SH
+cat > "$FAKE_BIN/sleep" <<'SH'
+#!/bin/bash
+set -euo pipefail
+echo "$1" >> "$CREDIT_CLAIM_TEST_STATE/sleeps"
+# No terminal state may be created while retrying.
+[ ! -e "$CREDIT_CLAIM_CONFIG_DIR/failure.json" ]
+if [ "${CREDIT_CLAIM_TEST_SCENARIO}" = transient-success ]; then
+    # A simultaneous invocation must skip without another request or outcome.
+    "$CREDIT_CLAIM_TEST_SCRIPT"
+fi
+SH
+chmod +x "$FAKE_BIN/sleep"
 chmod +x "$FAKE_BIN/curl" "$FAKE_BIN/node" "$FAKE_BIN/systemctl"
 
 prepare_case() {
@@ -150,6 +188,7 @@ run_claim() {
         CREDIT_CLAIM_REFRESH_SCRIPT="$CASE_ROOT/fake-refresh.mjs" \
         CREDIT_CLAIM_TEST_SCENARIO="$scenario" \
         CREDIT_CLAIM_TEST_STATE="$CASE_STATE" \
+        CREDIT_CLAIM_TEST_SCRIPT="$CLAIM_SCRIPT" \
         "$CLAIM_SCRIPT"
 }
 
@@ -161,8 +200,8 @@ assert_equal 1 "$(line_count "$CASE_STATE/curl-count")" 'accepted claim request 
 assert_equal 0 "$(line_count "$CASE_STATE/refresh-count")" 'accepted claim refresh count'
 assert_equal 2 "$(line_count "$CASE_STATE/systemctl-calls")" 'accepted claim timer mutation count'
 ! rg -q 'sentinel-secret-token' "$CASE_CONFIG/claim.log" || fail 'accepted claim leaked token'
-[ ! -e "$CASE_CONFIG/failure.json" ] || fail 'accepted claim did not clear failure state'
-[ ! -e "$CASE_CONFIG/notified.json" ] || fail 'accepted claim did not clear notified state'
+rg -q '"category":"success"' "$CASE_CONFIG/failure.json" || fail 'success outcome missing'
+[ -e "$CASE_CONFIG/notified.json" ] || fail 'old notification state unexpectedly deleted'
 
 prepare_case not-in-time
 run_claim not-in-time
@@ -210,9 +249,9 @@ prepare_case curl-fails
 if run_claim curl-fails; then
     fail 'curl failure unexpectedly succeeded'
 fi
-assert_equal 1 "$(line_count "$CASE_STATE/curl-count")" 'curl failure request count'
+assert_equal 4 "$(line_count "$CASE_STATE/curl-count")" 'curl failure request count'
 assert_equal 0 "$(line_count "$CASE_STATE/refresh-count")" 'curl failure refresh count'
-rg -q '"category":"claim-request-failed"' "$CASE_CONFIG/failure.json" \
+rg -q '"category":"retries-exhausted"' "$CASE_CONFIG/failure.json" \
     || fail 'curl failure category missing'
 
 prepare_case timer-update-fails
@@ -270,5 +309,51 @@ run_claim success
 flock -u 8
 assert_equal 0 "$(line_count "$CASE_STATE/curl-count")" 'lock contention request count'
 rg -q 'already running; skipping' "$CASE_CONFIG/claim.log" || fail 'lock contention feedback missing'
+
+for scenario in transient-success dns-success connect-success proxy-success transient-cooldown mixed; do
+    prepare_case "$scenario"
+    run_claim "$scenario"
+    expected=2
+    [ "$scenario" != mixed ] || expected=4
+    assert_equal "$expected" "$(line_count "$CASE_STATE/curl-count")" "$scenario request count"
+    assert_equal 1 "$(find "$CASE_CONFIG/outcomes" -name '*.json' | wc -l | tr -d ' ')" "$scenario terminal outcome count"
+    if [ "$scenario" = mixed ]; then
+        assert_equal 1 "$(line_count "$CASE_STATE/refresh-count")" 'mixed refresh limit'
+        assert_equal $'300\n900' "$(cat "$CASE_STATE/sleeps")" 'mixed delays'
+    else
+        assert_equal 300 "$(cat "$CASE_STATE/sleeps")" "$scenario delay"
+    fi
+    category=success
+    [ "$scenario" != transient-cooldown ] || category=not-in-time
+    rg -q "\"category\":\"$category\"" "$CASE_CONFIG/failure.json" || fail "$scenario terminal condition"
+done
+
+for scenario in exhausted mixed-auth-fails excluded-timeout misleading-success; do
+    prepare_case "$scenario"
+    if run_claim "$scenario"; then fail "$scenario unexpectedly succeeded"; fi
+    case "$scenario" in
+        exhausted) count=4; category=retries-exhausted
+            assert_equal $'300\n900\n1800' "$(cat "$CASE_STATE/sleeps")" 'exhaustion delays' ;;
+        mixed-auth-fails) count=4; category=refreshed-token-rejected ;;
+        excluded-timeout) count=1; category=claim-request-failed ;;
+        misleading-success) count=1; category=unexpected-api-response ;;
+    esac
+    assert_equal "$count" "$(line_count "$CASE_STATE/curl-count")" "$scenario count"
+    assert_equal 0 "$(line_count "$CASE_STATE/systemctl-calls")" "$scenario schedule unchanged"
+    rg -q "\"category\":\"$category\"" "$CASE_CONFIG/failure.json" || fail "$scenario category"
+done
+
+prepare_case repeated-manual
+run_claim not-in-time
+run_claim not-in-time
+assert_equal 2 "$(find "$CASE_CONFIG/outcomes" -name '*.json' | wc -l | tr -d ' ')" 'manual invocation identities'
+
+# Exercise focused installation with fake systemctl and an isolated destination.
+prepare_case install-units
+env XDG_CONFIG_HOME="$CASE_CONFIG" PATH="$FAKE_BIN:/usr/bin" \
+    CREDIT_CLAIM_TEST_SCENARIO=install CREDIT_CLAIM_TEST_STATE="$CASE_STATE" \
+    "$TEST_DIR/../../../../host-install" --user-unit credit-claim.service credit-claim-notify.service
+cmp "$TEST_DIR/../../systemd/user/credit-claim.service" "$CASE_CONFIG/systemd/user/credit-claim.service"
+assert_equal 1 "$(line_count "$CASE_STATE/systemctl-calls")" 'focused install reload'
 
 echo 'claim workflow tests passed'

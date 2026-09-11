@@ -1,5 +1,5 @@
 [Unit]
-Description=Deliver pending credit-claim failure through Hermes Discord
+Description=Deliver pending credit-claim outcomes through Hermes Discord
 After=network-online.target
 Wants=network-online.target
 

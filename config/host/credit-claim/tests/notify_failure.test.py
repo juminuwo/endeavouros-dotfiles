@@ -110,9 +110,10 @@ esac
         self.assertEqual(json.loads(notified.read_text())["category"], "login-required")
         self.assertEqual(stat.S_IMODE(notified.stat().st_mode), 0o600)
 
-    def test_changed_failure_category_sends_again(self):
+    def test_new_invocation_sends_again(self):
         self.write_failure("login-required")
         self.assertEqual(self.run_notifier().returncode, 0)
+        self.environment["TEST_INVOCATION_ID"] = "b" * 32
         self.write_failure("schedule-failed")
         self.assertEqual(self.run_notifier().returncode, 0)
         self.assertEqual(len(self.messages()), 2)
@@ -155,6 +156,102 @@ esac
             json.loads((self.config / "failure.json").read_text())["category"],
             "generic-failure",
         )
+
+    def queue_outcome(self, category, invocation_id, **fields):
+        value = {"version": 2, "category": category, "invocation_id": invocation_id, **fields}
+        outcomes = self.config / "outcomes"
+        outcomes.mkdir(exist_ok=True)
+        (outcomes / f"{invocation_id}.json").write_text(json.dumps(value))
+        return value
+
+    def test_all_terminal_conditions_have_explicit_stop_condition(self):
+        self.environment["TEST_ACTIVE_STATE"] = "inactive"
+        for category, condition in [
+            ("success", "success"), ("not-in-time", "not in time"),
+            ("retries-exhausted", "retries exhausted"),
+            ("refreshed-token-rejected", "authentication failure"),
+            ("configuration-failed", "configuration failure"),
+            ("unexpected-api-response", "unexpected API response"),
+        ]:
+            self.queue_outcome(category, category, retry_count=3, attempts=4, http_status="522")
+            self.assertEqual(self.run_notifier().returncode, 0)
+            self.assertIn(f"Stop condition: {condition}.", self.messages()[-1]["body"])
+        self.assertEqual(len(self.messages()), 6)
+        self.assertIn("Claim retries: 3", self.messages()[-1]["body"])
+        self.assertIn("Total claim attempts: 4", self.messages()[-1]["body"])
+
+    def test_same_category_different_runs_and_duplicate_records(self):
+        self.environment["TEST_ACTIVE_STATE"] = "inactive"
+        for invocation in ["first", "second"]:
+            state = self.queue_outcome("success", invocation)
+            (self.config / "failure.json").write_text(json.dumps(state))
+            self.assertEqual(self.run_notifier().returncode, 0)
+        self.assertEqual(self.run_notifier().returncode, 0)
+        self.assertEqual(len(self.messages()), 2)
+        self.assertEqual(list((self.config / "outcomes").glob("*.json")), [])
+
+    def test_pending_delivery_survives_new_terminal_run(self):
+        self.environment["TEST_ACTIVE_STATE"] = "inactive"
+        self.queue_outcome("retries-exhausted", "first")
+        self.environment["TEST_HERMES_EXIT"] = "1"
+        self.assertEqual(self.run_notifier().returncode, 1)
+        self.assertEqual(len(list((self.config / "outcomes").glob("*.json"))), 1)
+        self.queue_outcome("success", "second")
+        self.environment["TEST_HERMES_EXIT"] = "0"
+        self.assertEqual(self.run_notifier().returncode, 0)
+        self.assertEqual(len(self.messages()), 3)
+        self.assertEqual(len(list((self.config / "delivered").glob("*.json"))), 2)
+
+    def test_failed_delivery_attempts_duplicate_outcome_only_once(self):
+        self.environment["TEST_ACTIVE_STATE"] = "inactive"
+        state = self.queue_outcome("retries-exhausted", "first")
+        (self.config / "failure.json").write_text(json.dumps(state))
+        (self.config / "outcomes" / "duplicate.json").write_text(json.dumps(state))
+        self.queue_outcome("success", "second")
+        self.environment["TEST_HERMES_EXIT"] = "1"
+        self.assertEqual(self.run_notifier().returncode, 1)
+        self.assertEqual(len(self.messages()), 1)
+        self.assertEqual(len(list((self.config / "outcomes").glob("*.json"))), 3)
+        self.environment["TEST_HERMES_EXIT"] = "0"
+        self.assertEqual(self.run_notifier().returncode, 0)
+        self.assertEqual(len(self.messages()), 3)
+        self.assertEqual(list((self.config / "outcomes").glob("*.json")), [])
+
+    def test_active_service_does_not_generate_intermediate_notification(self):
+        self.write_failure("claim-request-failed")
+        for active in ["active", "activating", "deactivating"]:
+            self.environment["TEST_ACTIVE_STATE"] = active
+            self.assertEqual(self.run_notifier().returncode, 0)
+        self.assertEqual(self.messages(), [])
+        self.queue_outcome("success", "previous-completed-run")
+        self.assertEqual(self.run_notifier().returncode, 0)
+        self.assertEqual(len(self.messages()), 1)
+
+    def test_failed_service_recovers_queue_before_generic_fallback(self):
+        self.queue_outcome("retries-exhausted", self.environment["TEST_INVOCATION_ID"])
+        self.assertEqual(self.run_notifier().returncode, 0)
+        self.assertEqual(len(self.messages()), 1)
+        self.assertIn("Stop condition: retries exhausted.", self.messages()[0]["body"])
+
+    def test_raw_outcome_fields_are_never_sent(self):
+        self.environment["TEST_ACTIVE_STATE"] = "inactive"
+        secret = "sentinel-secret-token https://private.example.invalid"
+        self.queue_outcome("retries-exhausted", "private", retry_count=secret,
+                           attempts=secret, http_status=secret, curl_status=secret,
+                           response=secret, timestamp=secret, error=secret)
+        self.assertEqual(self.run_notifier().returncode, 0)
+        self.assertNotIn("sentinel-secret-token", self.messages()[0]["body"])
+        self.assertNotIn("private.example.invalid", self.messages()[0]["body"])
+
+    def test_concurrent_notifiers_send_once(self):
+        self.environment["TEST_ACTIVE_STATE"] = "inactive"
+        self.queue_outcome("success", "parallel")
+        processes = [subprocess.Popen([str(NOTIFIER)], env=self.environment,
+                     stdout=subprocess.PIPE, stderr=subprocess.PIPE) for _ in range(3)]
+        for process in processes:
+            process.communicate(timeout=10)
+            self.assertEqual(process.returncode, 0)
+        self.assertEqual(len(self.messages()), 1)
 
     def test_test_message_does_not_create_delivery_state(self):
         self.environment["TEST_ACTIVE_STATE"] = "inactive"

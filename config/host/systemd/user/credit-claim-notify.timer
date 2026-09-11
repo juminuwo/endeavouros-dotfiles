@@ -1,5 +1,5 @@
 [Unit]
-Description=Retry pending credit-claim failure notifications
+Description=Retry pending credit-claim outcome notifications
 
 [Timer]
 OnBootSec=2min
