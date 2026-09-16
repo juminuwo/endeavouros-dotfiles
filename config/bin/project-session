@@ -389,6 +389,9 @@ def pane(args):
         print(f"Saved directory is unavailable: {cwd}; opening home instead", flush=True)
         cwd = Path.home()
     os.chdir(cwd)
+    # Restored programs start directly from i3/Kitty, before zshrc can replace
+    # the display manager's EDITOR=nano. Match our configured editor defaults.
+    os.environ.update(EDITOR='nvim', VISUAL='nvim', SYSTEMD_EDITOR='nvim', SUDO_EDITOR='nvim')
     if args.codex_home:
         os.environ["CODEX_HOME"] = args.codex_home
     # Ctrl+C belongs to the foreground program. A handled (not SIG_IGN)
