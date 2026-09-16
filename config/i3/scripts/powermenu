@@ -35,72 +35,28 @@ find_lock_script() {
   return 1
 }
 
-# --- New Menu Entry ---
-save_shutdown="+💾 Save & Shutdown"
-
-# Menu entries
-chancel=" Cancel"
+# Every destructive session action saves the whole desktop first.
+save="💾 Save session now"
+status="ℹ Session save status"
+cancel=" Cancel"
 lock=" Lock"
 logout=" Logout"
 reboot=" Reboot"
 shutdown=" Shutdown"
-suspend=" Suspend"
-hibernate=" Hibernate"
 
-# Add lock only if script is found
+options="$cancel\n$save\n$status\n$logout\n$reboot\n$shutdown"
 if lockcmd="$(find_lock_script)"; then
-  options="$chancel\n$lock\n$logout\n$save_shutdown\n$reboot\n$shutdown"
-else
-  options="$chancel\n$logout\n$save_shutdown\n$reboot\n$shutdown"
+  options="$cancel\n$lock\n$save\n$status\n$logout\n$reboot\n$shutdown"
 fi
 
-chosen="$(echo -e "$options" | rofi -dmenu -i -p "Power Menu" \
-  -theme $ROFI_THEME)"
-
-case $chosen in
-"$lock")
-  $lockcmd
-  ;;
-"$cancel" | "")
-  exit 0
-  ;;
-"$logout")
-  i3-msg exit
-  ;;
-"$reboot")
-  systemctl reboot
-  ;;
-"$shutdown")
-  systemctl poweroff
-  ;;
-# --- New Case Block for Save & Shutdown ---
-"$save_shutdown")
-  # 1. Run the i3 save script
-  # Check if the script exists and is executable before proceeding
-  if [[ -x "$I3_SAVE_SCRIPT" ]]; then
-    # Run the save script (using bash to handle environment/expansion)
-    /bin/bash -c "$I3_SAVE_SCRIPT"
-
-    # Use '&&' to only poweroff if the save script finished successfully (exit code 0)
-    if [ $? -eq 0 ]; then
-      systemctl poweroff
-    else
-      echo "i3 session save failed. Aborting shutdown."
-      notify-send "i3-resurrect Warning" "Session save failed. Shutdown aborted."
-      exit 1
-    fi
-  else
-    # Fallback if the script path is wrong or the script is missing
-    echo "i3 save script not found or not executable: $I3_SAVE_SCRIPT"
-    notify-send "i3-resurrect Error" "Save script not found. Aborting shutdown."
-    exit 1
-  fi
-  ;;
-# ----------------------------------------
-"$suspend")
-  systemctl suspend
-  ;;
-"$hibernate")
-  systemctl hibernate
-  ;;
+chosen="$(printf '%b\n' "$options" | rofi -dmenu -i -p "Power Menu" -theme "$ROFI_THEME")"
+session="$HOME/.local/bin/desktop-session"
+case "$chosen" in
+  "$lock") "$lockcmd" ;;
+  "$save") "$I3_SAVE_SCRIPT" ;;
+  "$status") "$session" status --notify ;;
+  "$logout") "$session" power logout ;;
+  "$reboot") "$session" power reboot ;;
+  "$shutdown") "$session" power shutdown ;;
+  "$cancel" | "") exit 0 ;;
 esac

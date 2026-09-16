@@ -396,8 +396,8 @@ for_window [class="com.mitchellh.ghostty"] border pixel 5
 # make sure it loads gtk configs
 exec_always $HOME/.config/i3/scripts/import-gsettings
 
-# bootstrap / self-heal the active project on ws6 + ws7 (idempotent)
-exec_always --no-startup-id $HOME/.local/bin/project-switch ensure-default
+# One ordered desktop + project restore; repeated i3 startup is a no-op.
+exec_always --no-startup-id $HOME/.local/bin/restore_i3_session.sh
 
 # refresh i3blocks workspace blocks on every workspace event (no poll lag)
 exec_always --no-startup-id $HOME/.local/bin/i3-workspace-watcher
@@ -428,8 +428,7 @@ exec_always --no-startup-id sh -c 'pgrep -x clipmenud >/dev/null || clipmenud'
 
 
 ## applications/services
-# i3-resurrect auto run for all workspaces and programs
-exec --no-startup-id ~/.local/bin/restore_i3_session.sh
+# Desktop/project restoration is coordinated by the startup command above.
 
 #get auth work with polkit-gnome
 exec --no-startup-id /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1

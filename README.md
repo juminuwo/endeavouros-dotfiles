@@ -65,6 +65,8 @@ Installs configuration that needs root access or fixed system paths. Systemd uni
 | `credit-claim.{service,timer}` | `~/.config/systemd/user/` | Daily oneshot, starting at 10:10 and moving 30s later after each success |
 | `credit-claim-notify.{service,timer}` | `~/.config/systemd/user/` | Hermes Discord failure delivery with 15-minute pending retries |
 | `imoto-wiki-publish.{service,timer}` | `~/.config/systemd/user/` | Periodic Imoto wiki publish job |
+| `desktop-session-save.{service,timer}` | `~/.config/systemd/user/` | Save all project Kitty workspaces and exact Codex conversations every five minutes |
+| `desktop-session-shutdown.service` | `~/.config/systemd/user/` | Capture before logind shutdown/reboot while the graphical session is still alive |
 | `hermes-restic-backup.{service,timer}` | `~/.config/systemd/user/` | Encrypted restic backup of Hermes state and canonical agent skills |
 | `work.target` | `~/.config/systemd/user/` | Automatic group for work services |
 | `driver-shield-main-demo.service` | `~/.config/systemd/user/` | Driver Shield MAIN-demo API on port 8010 |
@@ -72,6 +74,123 @@ Installs configuration that needs root access or fixed system paths. Systemd uni
 | `hermes-gateway.service` and personal daemons | `~/.config/systemd/user/` | Always-on user services under `default.target` |
 
 After install, timers and service groups are reloaded and enabled. The Hermes restic timer is only enabled when `~/.config/restic/hermes-password` exists. Re-run `./host-install` whenever you edit the unit files in `config/host/systemd/`.
+
+## Whole-desktop session recovery
+
+`save_i3_session.sh` and `restore_i3_session.sh` are compatibility entry points
+for `desktop-session`. One startup path coordinates ordinary i3 applications
+with the separately owned project windows. The five-minute timer saves only
+projects; full-desktop saves run manually and before shutdown, reboot or logout. The earlier
+project-only timer is disabled by `host-install`.
+
+- **Automatic:** save all projects every five minutes; restore on graphical login after boot.
+  Background saves use nice level 19, idle I/O scheduling and a CPU quota of
+  25% of one core for the save service and its children. Manual and shutdown
+  saves are not throttled. Work requested from existing Kitty/i3 processes is
+  outside that quota.
+  Restarting i3 in place preserves running windows and does not relaunch apps.
+- **Manual:** Alt+Y → **[ save entire desktop ]**, or the power menu's
+  **Save session now**, or `save_i3_session.sh`.
+- **Confirmation:** manual saves emit one final notification with timestamp,
+  workspace/window counts, and project/Codex counts. It appears only after the
+  complete desktop generation is published. Failures say what failed and leave
+  the preceding complete desktop snapshot available; the project component may
+  have saved a newer independent snapshot before an ordinary capture failed.
+- **Status:** Alt+Y → **[ session save status ]**, the power menu's
+  **Session save status**, or `desktop-session status`. Status includes the last
+  complete snapshot, last save failure if any, and incomplete restore state.
+- **Power menu:** reboot, shutdown and logout all save first and abort if saving
+  fails. The old separate Save & Shutdown choice is no longer needed.
+- **Other reboot/shutdown requests:** `desktop-session-shutdown.service` holds a
+  logind delay inhibitor and requests a final save on `PrepareForShutdown`.
+  The host's delay budget is five seconds; if saving fails or exceeds the budget,
+  the previous complete snapshot remains. Forced shutdown and power loss cannot
+  be intercepted. Autosaving is frozen once shutdown begins, preventing closing
+  applications from replacing the snapshot with a partly dismantled desktop.
+  Windows changing during capture cause it to retain the previous snapshot.
+  External shutdown can close apps before capture starts; use the power menu
+  to ensure the desktop is saved before requesting shutdown.
+
+Desktop snapshots are private files under `~/.local/state/desktop-session/`
+(or `$XDG_STATE_HOME`); ten complete generations are retained. Ordinary workspace
+names are discovered dynamically, including renamed workspaces. Reserved project
+workspaces and scratchpad windows are excluded from ordinary restoration.
+`i3-resurrect` supplies capture data; restoration uses checked i3 layout commands,
+safe argv launches, stable placeholder marks, and verifies that application
+windows appear. Existing matching windows are adopted, including autostarted
+applications. No parallel per-workspace launch races or unchecked success echoes.
+Ordinary Kitty windows also retain their native tabs and Codex conversations.
+Obsidian's old and new window identities are both recognized after upgrades;
+restore adapts a private layout copy while preserving the original snapshot.
+If no project windows are open, ordinary desktop capture still succeeds and
+explicitly reports that the prior project snapshot was retained unchanged.
+
+An incomplete restore pauses automatic project saves and gives an error naming
+missing applications. Fix the missing app and run `desktop-session restore` to
+retry. Completed windows/layouts are not relaunched. Project restoration still
+runs even if an ordinary app cannot open. Browser tabs, documents and editor
+buffers rely on each application's own session recovery; this saves window
+placement and launch state, not process memory or unsaved content.
+
+The shutdown listener uses the installed `python-dbus` and `python-gobject`
+packages. Protocol references: [logind inhibitors](https://systemd.io/INHIBITOR_LOCKS/),
+[i3 layout restoration](https://i3wm.org/docs/layout-saving.html), and
+[i3-resurrect capture](https://github.com/JonnyHaystack/i3-resurrect).
+
+## Project workspace recovery
+
+`project-switch` saves all Kitty windows on its project workspaces (6, 7 and
+hidden `_proj_*` workspaces), including inactive projects, tabs, split layouts,
+working directories and exact running Codex conversation IDs. Other workspaces
+are captured and restored by the whole-desktop coordinator described above.
+
+- Autosave: projects only, every five minutes via `desktop-session-save.timer` (up to five seconds
+  timer slack). It starts saving only after i3 startup/restore completes.
+- Restore: i3 runs `restore_i3_session.sh` on login, coordinating ordinary
+  applications and `project-switch startup`. Saved projects are restored before
+  default bootstrap. Repeated startup in the same i3 session leaves live
+  windows alone, including windows intentionally closed since startup.
+- Manual save: **Alt+Y → [ save all projects ]**, or `project-switch save`.
+- Status: `project-switch status`.
+- Retry an interrupted restore: `project-switch restore`. Already launched
+  windows are recognized by stable classes, including interruption before i3
+  marks were assigned.
+- The power menu saves the entire desktop before reboot, shutdown and logout.
+  A failed save aborts the requested action with a visible error.
+
+Snapshots live under `~/.local/state/project-switch/` (or `$XDG_STATE_HOME`),
+outside Git. A complete generation is published atomically through `current.json`;
+the ten most recent generations are retained. Failed capture, unavailable Kitty,
+an empty desktop, and incomplete restoration do not replace the last complete
+snapshot. Save/restore and project mutations share the same lock. The five-minute
+interval means a sudden power loss can lose workspace changes since the last
+successful save. Check the timer's failures with:
+
+```bash
+systemctl --user status desktop-session-save.timer
+journalctl --user -u desktop-session-save.service -n 30
+```
+
+Codex identity is taken from that process's open main conversation file; subagent
+files are excluded. An ambiguous or not-yet-created conversation causes the save
+to fail and retry on the next timer tick, rather than guessing by directory.
+Restored Codex tabs run `codex resume <id>` without sending a prompt. Codex's own
+conversation files must still exist; workspace snapshots are not a backup of
+`~/.codex`.
+
+Shell tabs reopen in their saved directories. The agents dashboard also reopens;
+other foreground commands, editors and servers are not automatically replayed.
+Terminal scrollback, unsaved editor buffers and running processes are not
+preserved. If a saved directory no longer exists, the pane explains the problem
+and opens in the home directory. Leaving resumed Codex returns to a shell.
+
+After a fresh install, run `./host-install` to install and enable the timer.
+For a focused unit update:
+
+```bash
+./host-install --user-unit desktop-session-save.service desktop-session-save.timer desktop-session-shutdown.service
+systemctl --user enable --now desktop-session-save.timer desktop-session-shutdown.service
+```
 
 ## Hermes state and backups
 

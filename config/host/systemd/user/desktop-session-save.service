@@ -1,0 +1,12 @@
+[Unit]
+Description=Save all project Kitty tabs and Codex sessions
+
+[Service]
+Type=oneshot
+Nice=19
+CPUWeight=10
+CPUQuota=25%
+IOSchedulingClass=idle
+ExecStart=%h/.local/bin/desktop-session save --auto --projects-only
+TimeoutStartSec=90
+UMask=0077

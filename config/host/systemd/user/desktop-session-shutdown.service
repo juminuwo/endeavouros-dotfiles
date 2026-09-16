@@ -1,0 +1,12 @@
+[Unit]
+Description=Save the i3 desktop before logind shutdown or reboot
+ConditionEnvironment=DISPLAY
+
+[Service]
+ExecStart=%h/.local/bin/desktop-session watch-shutdown
+Restart=on-failure
+RestartSec=5
+UMask=0077
+
+[Install]
+WantedBy=default.target

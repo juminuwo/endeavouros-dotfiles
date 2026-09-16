@@ -320,6 +320,10 @@ _focus_blocked_delete_target() {
 
 cmd_ensure_default() {
     _lock
+    _ensure_default
+}
+
+_ensure_default() {
     _normalize_marks
     if [[ -n "$(_marks_all)" ]]; then
         _log "ensure-default: marks already exist, no-op"
@@ -330,6 +334,34 @@ cmd_ensure_default() {
     _adopt_on_workspace "$DEFAULT_PROJECT" misc   || _spawn_role "$DEFAULT_PROJECT" misc
     _history_touch "$DEFAULT_PROJECT"
     _signal_i3blocks
+}
+
+# Persistence shares fd9 with all project mutations. Startup must restore
+# before ensure-default, otherwise the default pair would mask saved projects.
+_session() {
+    PROJECT_SWITCH_LOCK_FD=9 "$HOME/.local/bin/project-session" "$@"
+}
+
+cmd_startup() {
+    _lock
+    if ! _session restore; then
+        _die "workspace restore incomplete; snapshot preserved. Run project-switch restore to retry"
+    fi
+    _ensure_default
+    _session ready
+    # The timer needs the current X/i3 connection, not one from a prior login.
+    systemctl --user import-environment DISPLAY XAUTHORITY I3SOCK || true
+    _signal_i3blocks
+}
+
+cmd_save() {
+    _lock
+    if ! _session save "$@"; then
+        _die "workspace save failed; previous snapshot preserved (see command output or user journal)"
+    fi
+    if [[ "${1:-}" != --auto ]]; then
+        command -v notify-send >/dev/null && notify-send "Project workspace saved" "Kitty tabs and Codex conversations saved for restart." || true
+    fi
 }
 
 cmd_list() {
@@ -455,6 +487,9 @@ cmd_switch() {
             menu+="$current (active)"$'\n'
         fi
         menu+="[ new project ]"
+        menu+=$'\n'"[ save all projects ]"
+        menu+=$'\n'"[ save entire desktop ]"
+        menu+=$'\n'"[ session save status ]"
         if [[ -n "$current" ]]; then
             menu+=$'\n'"[ rename '${current}' ]"
             menu+=$'\n'"[ delete '${current}' ]"
@@ -466,6 +501,9 @@ cmd_switch() {
 
         case "$sel" in
             "[ new project ]")      cmd_new; return ;;
+            "[ save all projects ]") cmd_save; return ;;
+            "[ save entire desktop ]") "$HOME/.local/bin/save_i3_session.sh"; return ;;
+            "[ session save status ]") "$HOME/.local/bin/desktop-session" status --notify; return ;;
             "[ rename '"*"' ]")     cmd_rename; return ;;
             "[ delete '"*"' ]")     cmd_delete; return ;;
         esac
@@ -637,6 +675,9 @@ main() {
     local sub="${1:-}"
     [[ $# -gt 0 ]] && shift || true
     case "$sub" in
+        startup|restore) cmd_startup "$@" ;;
+        save)           cmd_save "$@" ;;
+        status)         _lock; _session status ;;
         ensure-default) cmd_ensure_default "$@" ;;
         list)           cmd_list "$@" ;;
         current)        cmd_current "$@" ;;
@@ -651,6 +692,10 @@ main() {
 project-switch — i3+kitty project pair manager
 
 Usage:
+  project-switch startup            restore once per i3 session, then bootstrap
+  project-switch save [--auto]       save all project Kitty tabs and Codex sessions
+  project-switch restore             retry an interrupted startup restore
+  project-switch status              show last complete snapshot
   project-switch ensure-default     idempotent bootstrap (run from i3 exec_always)
   project-switch list               list all projects (current marked active)
   project-switch current            print active project name

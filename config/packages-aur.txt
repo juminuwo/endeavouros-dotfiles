@@ -5,6 +5,7 @@ calibre-bin
 cursor-bin
 google-chrome
 hunk-bin
+i3-resurrect
 koreader-bin
 leaf-markdown-viewer-bin
 localsend-bin

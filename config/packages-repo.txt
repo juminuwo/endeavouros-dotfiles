@@ -55,6 +55,8 @@ python-pip
 python-pipx
 python-beautifulsoup4
 python-defusedxml
+python-dbus
+python-gobject
 python-evdev
 python-html5lib
 python-jinja

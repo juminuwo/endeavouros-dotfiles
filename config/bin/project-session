@@ -1,0 +1,445 @@
+#!/usr/bin/env python3
+"""Private persistence helper for project-switch; stdlib only.
+
+Kitty owns its session/layout format. We retain its layout serialization but
+replace launch commands, so snapshots never replay shell jobs or stale env vars.
+"""
+import argparse
+import fcntl
+import json
+import os
+from pathlib import Path
+import re
+import shlex
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+import uuid
+
+STATE = Path(os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local/state"))) / "project-switch"
+HELPER = str(Path.home() / ".local/bin/project-session")
+MARK = re.compile(r"proj:([A-Za-z0-9._-]+):(misc|claude)\Z")
+HIDDEN = re.compile(r"_proj_([A-Za-z0-9._-]+)_(misc|claude)\Z")
+LOCK = "/tmp/project-switch.lock"
+
+
+def run(*args):
+    return subprocess.check_output(args, text=True, stderr=subprocess.PIPE, timeout=15)
+
+
+def i3(command):
+    result = json.loads(run("i3-msg", "--", command))
+    if not result or not all(r.get("success") for r in result):
+        raise RuntimeError(f"i3 rejected {command}: {result}")
+
+
+def tree():
+    return json.loads(run("i3-msg", "-t", "get_tree"))
+
+
+def walk(node, workspace=""):
+    if node.get("type") == "workspace":
+        workspace = node["name"]
+    if node.get("window"):
+        yield workspace, node
+    for child in node.get("nodes", []) + node.get("floating_nodes", []):
+        yield from walk(child, workspace)
+
+
+def project_windows(root):
+    windows = list(walk(root))
+    active = set()
+    for ws, n in windows:
+        marks = [MARK.fullmatch(m) for m in n.get("marks", []) if MARK.fullmatch(m)]
+        if marks and not (ws in {"6", "7"} or HIDDEN.fullmatch(ws)):
+            raise RuntimeError(f"Project window moved outside its workspace ({ws}); reconcile before saving")
+        if ws in {"6", "7"}:
+            active.update(m[1] for m in marks)
+    if len(active) > 1:
+        raise RuntimeError("Multiple active project identities; reconcile before saving")
+    grouped = {}
+    for ws, n in windows:
+        if ws in {"6", "7"} or HIDDEN.fullmatch(ws):
+            if "kitty" in n.get("window_properties", {}).get("class", "").lower():
+                grouped.setdefault(ws, []).append(n)
+            elif any(MARK.fullmatch(m) for m in n.get("marks", [])):
+                raise RuntimeError("Project mark belongs to a non-Kitty window")
+    result = []
+    for ws, nodes in grouped.items():
+        hidden = HIDDEN.fullmatch(ws)
+        if hidden:
+            name, role = hidden.groups()
+        else:
+            if not active:
+                raise RuntimeError("Unmarked windows on 6/7 have no active project identity; keeping previous snapshot")
+            name, role = next(iter(active)), "misc" if ws == "6" else "claude"
+        expected = f"proj:{name}:{role}"
+        marks = [m for n in nodes for m in n.get("marks", []) if MARK.fullmatch(m)]
+        if marks and marks != [expected]:
+            raise RuntimeError(f"Conflicting project marks on {ws}; reconcile before saving")
+        # A user can close the marked anchor and leave extra Kitty windows.
+        # Recover identity from the hidden name / active counterpart, assigning
+        # the first survivor the role's mark in the snapshot only.
+        if not marks:
+            nodes = [{**nodes[0], "marks": [*nodes[0].get("marks", []), expected]}, *nodes[1:]]
+        result.extend((ws, n) for n in nodes)
+    return result
+
+
+def desktop_id():
+    socket = run("i3", "--get-socketpath").strip()
+    if not Path(socket).exists():
+        raise RuntimeError("i3 is not running")
+    return Path("/proc/sys/kernel/random/boot_id").read_text().strip() + ":" + socket
+
+
+def atomic_json(path, value):
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd, name = tempfile.mkstemp(dir=path.parent, prefix=".write-")
+    try:
+        with os.fdopen(fd, "w") as stream:
+            json.dump(value, stream, indent=2)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(name, path)
+        sync_dir(path.parent)
+    finally:
+        Path(name).unlink(missing_ok=True)
+
+
+def sync_dir(path):
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def read_json(path, default=None):
+    return json.loads(path.read_text()) if path.exists() else default
+
+
+def rc(socket, *args):
+    return run("kitten", "@", "--to", "unix:" + str(socket), *args)
+
+
+def kitty_windows():
+    result = {}
+    for socket in Path("/tmp").glob("kitty-*"):
+        if not socket.is_socket() or socket.stat().st_uid != os.getuid():
+            continue
+        try:
+            for window in json.loads(rc(socket, "ls")):
+                result[window["platform_window_id"]] = (socket, window)
+        except (subprocess.SubprocessError, ValueError):
+            # Unrelated/stale sockets do not invalidate a snapshot. Every
+            # project window must still have a successful match below.
+            continue
+    return result
+
+
+def codex_session(pid):
+    """Resolve only this process's main conversation, never latest-by-cwd.
+
+    Codex keeps subagent rollouts open too: source=cli excludes those. A
+    missing/ambiguous root aborts this save and leaves the prior snapshot intact.
+    """
+    roots = {}
+    for fd in Path(f"/proc/{pid}/fd").iterdir():
+        try:
+            target = fd.resolve(strict=True)
+            if not target.name.startswith("rollout-") or target.suffix != ".jsonl":
+                continue
+            with target.open() as stream:
+                event = json.loads(stream.readline())
+            meta = event.get("payload", {})
+            if event.get("type") == "session_meta" and meta.get("source") == "cli":
+                sid = str(uuid.UUID(meta["id"]))
+                roots[sid] = {"id": sid, "cwd": meta["cwd"]}
+        except (OSError, ValueError, KeyError):
+            continue
+    if len(roots) != 1:
+        raise RuntimeError(f"Cannot identify one main Codex conversation for PID {pid}; retry after it finishes starting")
+    session = next(iter(roots.values()))
+    # Read only this one non-secret setting; do not persist the process env.
+    for item in Path(f"/proc/{pid}/environ").read_bytes().split(b"\0"):
+        if item.startswith(b"CODEX_HOME="):
+            session["home"] = os.fsdecode(item.split(b"=", 1)[1])
+    return session
+
+
+def pane_info(window):
+    processes = window.get("foreground_processes", [])
+    codex = [p for p in processes if p.get("cmdline") and Path(p["cmdline"][0]).name == "codex"]
+    if len(codex) > 1:
+        raise RuntimeError("Multiple foreground Codex processes in one pane")
+    info = {"cwd": window.get("cwd") or str(Path.home())}
+    if codex:
+        info["codex"] = codex_session(codex[0]["pid"])
+        info["cwd"] = info["codex"]["cwd"]
+    elif any("--session" in p.get("cmdline", []) and
+             any(Path(a).name == "project-session" for a in p.get("cmdline", [])) for p in processes):
+        raise RuntimeError("A restored Codex pane is still starting; keeping previous snapshot")
+    elif any(any(Path(arg).name == "agents-dashboard" for arg in p.get("cmdline", [])) for p in processes):
+        info["dashboard"] = True
+    return info
+
+
+def safe_session(native, panes):
+    """Preserve native layouts/IDs while replacing every executable launch."""
+    output, seen = [], set()
+    for line in native.splitlines():
+        key = line.split(maxsplit=1)[0] if line.strip() else ""
+        if key == "launch":
+            args = shlex.split(line)
+            data = next((a.split("=", 1)[1] for a in args if a.startswith("kitty-unserialize-data=")), None)
+            if data is None:
+                raise RuntimeError("Kitty session format changed: missing window identity")
+            wid = json.loads(data)["id"]
+            pane = panes[wid]
+            seen.add(wid)
+            launch = ["launch", "kitty-unserialize-data=" + json.dumps({"id": wid})]
+            # Overlays belong to their underlying window, as in Kitty's native
+            # serializer. All other launch options/environment are regenerated.
+            launch += [a for a in args if a.startswith("--type=overlay")]
+            launch += [HELPER, "pane", "--cwd", pane["cwd"]]
+            if "codex" in pane:
+                launch += ["--session", pane["codex"]["id"]]
+                if pane["codex"].get("home"):
+                    launch += ["--codex-home", pane["codex"]["home"]]
+            elif pane.get("dashboard"):
+                launch += ["--dashboard"]
+            output.append(shlex.join(launch))
+        elif key in {"new_tab", "layout", "enabled_layouts", "set_layout_state", "focus", "focus_tab"}:
+            output.append(line)
+        # cd and OS identity are supplied afresh. Never restore inherited env,
+        # sockets, old process IDs, arbitrary commands or a second OS window.
+    if seen != set(panes):
+        raise RuntimeError("Kitty panes changed during capture; retry")
+    return "\n".join(output) + "\n"
+
+
+def signature(windows):
+    return [(ws, n["window"], sorted(n.get("marks", []))) for ws, n in windows]
+
+
+def save(auto=False, expected_windows=None):
+    try:
+        desktop = desktop_id()
+    except (RuntimeError, subprocess.SubprocessError):
+        if auto:
+            return
+        raise
+    journal = read_json(STATE / "restore.json", {})
+    if journal.get("desktop") != desktop or not journal.get("complete"):
+        if auto:
+            return
+        raise RuntimeError("Startup/restore is not complete; run project-switch startup first")
+    windows = project_windows(tree())
+    if expected_windows is not None and signature(windows) != expected_windows:
+        raise RuntimeError('Project windows changed before capture; keeping previous snapshot')
+    if not windows:
+        raise RuntimeError("No project windows; keeping the previous snapshot")
+    available = kitty_windows()
+    generation = time.strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8]
+    folder = STATE / "snapshots" / generation
+    folder.mkdir(parents=True, mode=0o700)
+    manifest = {"version": 1, "generation": generation, "saved_at": time.strftime("%Y-%m-%d %H:%M:%S%z"), "windows": []}
+    try:
+        for index, (workspace, node) in enumerate(windows):
+            if node["window"] not in available:
+                raise RuntimeError(f"Cannot reach Kitty on {workspace}; keeping previous snapshot")
+            socket, oswindow = available[node["window"]]
+            panes = {w["id"]: pane_info(w) for t in oswindow["tabs"] for w in t["windows"]}
+            filename = f"{index}.kitty-session"
+            raw = folder / "native.tmp"
+            match = " or ".join(f"id:{wid}" for wid in panes)
+            rc(socket, "action", "save_as_session " + shlex.join(["--save-only", "--match", match, str(raw)]))
+            session = safe_session(raw.read_text(), panes)
+            raw.unlink()
+            # Check tab/pane identity after native capture, including tab moves.
+            after = json.loads(rc(socket, "ls"))
+            current = next(w for w in after if w["id"] == oswindow["id"])
+            tab_ids = lambda w: [(t["id"], [p["id"] for p in t["windows"]]) for t in w["tabs"]]
+            if tab_ids(current) != tab_ids(oswindow):
+                raise RuntimeError("Kitty tabs changed during capture; retry")
+            current_panes = {w["id"]: pane_info(w) for t in current["tabs"] for w in t["windows"]}
+            if current_panes != panes:
+                raise RuntimeError("A pane changed directory or conversation during capture; retry")
+            with (folder / filename).open("w") as stream:
+                stream.write(session)
+                stream.flush()
+                os.fsync(stream.fileno())
+            manifest["windows"].append({"workspace": workspace, "marks": [m for m in node.get("marks", []) if MARK.fullmatch(m)],
+                "file": filename, "panes": list(panes.values()), "tabs": len(oswindow["tabs"])})
+            if node.get("focused"):
+                manifest["focused_window"] = index
+        if signature(project_windows(tree())) != signature(windows):
+            raise RuntimeError("Project windows changed during capture; retry")
+        atomic_json(folder / "manifest.json", manifest)
+    except BaseException:
+        shutil.rmtree(folder)
+        raise
+    # Publish only a complete generation; never delete it if publication's
+    # final fsync fails after rename. Keep ten generations for manual recovery.
+    atomic_json(STATE / "current.json", {"generation": generation})
+    generations = sorted((STATE / "snapshots").iterdir(), reverse=True)
+    for old in generations[10:]:
+        shutil.rmtree(old)
+    print(summary(manifest))
+
+
+def summary(manifest):
+    windows = manifest["windows"]
+    projects = {m.split(":")[1] for w in windows for m in w["marks"]}
+    sessions = sum("codex" in p for w in windows for p in w["panes"])
+    return f"Saved {manifest['saved_at']}: {len(projects)} projects, {len(windows)} windows, {sum(w['tabs'] for w in windows)} tabs, {sessions} Codex conversations"
+
+
+def snapshot():
+    pointer = read_json(STATE / "current.json")
+    if pointer is None:
+        return None, None
+    generation = pointer["generation"]
+    if not re.fullmatch(r"[0-9]{8}T[0-9]{6}-[a-f0-9]{8}", generation):
+        raise RuntimeError("Invalid snapshot generation")
+    folder = STATE / "snapshots" / generation
+    manifest = read_json(folder / "manifest.json")
+    if not manifest or manifest.get("version") != 1 or not manifest.get("windows"):
+        raise RuntimeError("Invalid or empty snapshot manifest")
+    for w in manifest["windows"]:
+        if not re.fullmatch(r"[0-9]+\.kitty-session", w["file"]) or not (folder / w["file"]).is_file():
+            raise RuntimeError("Missing Kitty session file")
+        if not (w["workspace"] in {"6", "7"} or re.fullmatch(r"_proj_[A-Za-z0-9._-]+_(misc|claude)", w["workspace"])):
+            raise RuntimeError("Invalid project workspace")
+        if any(not MARK.fullmatch(m) for m in w["marks"]):
+            raise RuntimeError("Invalid project mark")
+    return folder, manifest
+
+
+def restore():
+    desktop = desktop_id()
+    journal = read_json(STATE / "restore.json", {})
+    if journal.get("desktop") == desktop and journal.get("complete"):
+        print("Project workspace already initialized; no windows opened")
+        return
+    folder, manifest = snapshot()
+    if journal.get("desktop") != desktop:
+        if project_windows(tree()):
+            print("Live projects already exist; keeping this workspace")
+            return
+        if manifest is None:
+            print("No saved workspace; creating the default project")
+            return
+        journal = {"desktop": desktop, "complete": False, "generation": manifest["generation"]}
+        atomic_json(STATE / "restore.json", journal)
+    if manifest is None or journal.get("generation") != manifest["generation"]:
+        raise RuntimeError("Restore snapshot changed during recovery")
+    # Preflight every session before any window is launched.
+    focused = next((n["id"] for _, n in walk(tree()) if n.get("focused")), None)
+    restored_focus = None
+    for index, entry in enumerate(manifest["windows"]):
+        cls = f"kitty-proj-restore-{manifest['generation']}-{index}"
+        def find():
+            return next(((ws, n) for ws, n in walk(tree()) if n.get("window_properties", {}).get("class") == cls), None)
+        found = find()
+        if found is None:
+            # A stable class lets retry find a window even if we were interrupted
+            # after spawn but before assigning i3 marks. No inherited lock fd.
+            child_env = dict(os.environ)
+            child_env.pop("PROJECT_SWITCH_LOCK_FD", None)
+            subprocess.Popen(["kitty", "--class", cls, "--name", cls, "--session", str(folder / entry["file"])],
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             start_new_session=True, close_fds=True, env=child_env)
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline:
+                found = find()
+                if found:
+                    break
+                time.sleep(0.1)
+            if found is None:
+                raise RuntimeError(f"Kitty failed to open {entry['workspace']}; run project-switch restore to retry")
+        _, node = found
+        selector = f"[con_id={node['id']}]"
+        i3(f"{selector} move container to workspace {json.dumps(entry['workspace'])}, floating disable")
+        for mark in entry["marks"]:
+            i3(f"{selector} mark --add {json.dumps(mark)}")
+        placed = find()
+        if placed is None or placed[0] != entry["workspace"] or not set(entry["marks"]).issubset(placed[1].get("marks", [])):
+            raise RuntimeError("Restored window placement could not be verified")
+        if index == manifest.get("focused_window"):
+            restored_focus = node["id"]
+    if not focused and restored_focus:
+        i3(f"[con_id={restored_focus}] focus")
+    if focused:
+        # Best effort: a pre-existing focused window may have closed meanwhile.
+        if any(n["id"] == focused for _, n in walk(tree())):
+            i3(f"[con_id={focused}] focus")
+    print(f"Restored {len(manifest['windows'])} project windows")
+    # ready is written by the caller only after fallback bootstrap succeeds.
+
+
+def pane(args):
+    cwd = Path(args.cwd).expanduser()
+    if not cwd.is_dir():
+        print(f"Saved directory is unavailable: {cwd}; opening home instead", flush=True)
+        cwd = Path.home()
+    os.chdir(cwd)
+    if args.codex_home:
+        os.environ["CODEX_HOME"] = args.codex_home
+    # Ctrl+C belongs to the foreground program. A handled (not SIG_IGN)
+    # disposition resets on child exec, while the Python parent keeps waiting.
+    signal.signal(signal.SIGINT, lambda *_: None)
+    try:
+        if args.session:
+            # Launch a conversation, never a stored user prompt. Returning from
+            # Codex leaves an interactive shell instead of closing the saved tab.
+            subprocess.run(["codex", "resume", args.session, "--cd", str(cwd)], check=False)
+        elif args.dashboard:
+            subprocess.run([str(Path.home() / ".local/bin/agents-dashboard")], check=False)
+    except OSError as error:
+        print(f"Could not reopen saved program: {error}", flush=True)
+    shell = os.environ.get("SHELL", "/usr/bin/zsh")
+    os.execl(shell, shell)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("command", choices=["save", "restore", "ready", "status", "pane"])
+    parser.add_argument("--auto", action="store_true")
+    parser.add_argument("--cwd")
+    parser.add_argument("--session")
+    parser.add_argument("--codex-home")
+    parser.add_argument("--dashboard", action="store_true")
+    args = parser.parse_args()
+    if args.command == "pane":
+        pane(args)
+        return
+    os.umask(0o077)
+    STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
+    # project-switch supplies its existing fd; direct helper invocation takes
+    # the same lock. flock on the inherited open-file description is reentrant.
+    fd = int(os.environ["PROJECT_SWITCH_LOCK_FD"]) if "PROJECT_SWITCH_LOCK_FD" in os.environ else os.open(LOCK, os.O_CREAT | os.O_RDWR, 0o600)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    if args.command == "save":
+        save(args.auto)
+    elif args.command == "restore":
+        restore()
+    elif args.command == "ready":
+        atomic_json(STATE / "restore.json", {"desktop": desktop_id(), "complete": True})
+    elif args.command == "status":
+        _, manifest = snapshot()
+        print(summary(manifest) if manifest else "No project workspace saved yet")
+        print(f"Snapshots: {STATE / 'snapshots'}")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, RuntimeError, ValueError, KeyError, StopIteration, subprocess.SubprocessError) as error:
+        print(f"project-session: {error}", file=sys.stderr)
+        sys.exit(1)

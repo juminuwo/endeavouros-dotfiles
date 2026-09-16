@@ -1,0 +1,10 @@
+[Unit]
+Description=Autosave all project sessions every five minutes
+
+[Timer]
+OnStartupSec=5min
+OnUnitActiveSec=5min
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

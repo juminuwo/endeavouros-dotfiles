@@ -134,6 +134,7 @@ say "Enabling default user services"
 enable_user_units \
   hermes-gateway.service \
   kittylitter.service \
+  desktop-session-shutdown.service \
   mahore-viewer.service \
   mmo-mouse-workspaces.service \
   rclone-pcloud.service
@@ -148,7 +149,11 @@ say "Enabling user timers"
 enable_user_units \
   credit-claim.timer \
   credit-claim-notify.timer \
+  desktop-session-save.timer \
   imoto-wiki-publish.timer
+
+# The coordinated autosave timer supersedes the earlier standalone project timer.
+systemctl --user disable --now project-workspace-save.timer 2>/dev/null || true
 
 say "Installing user units (hermes-restic-backup)"
 if [[ -r "$HOME/.config/restic/hermes-password" ]]; then

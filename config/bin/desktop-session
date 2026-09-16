@@ -1,0 +1,515 @@
+#!/usr/bin/env python3
+"""Coordinated i3 desktop snapshots, boot recovery and shutdown preparation."""
+import argparse
+import contextlib
+import fcntl
+import importlib.machinery
+import importlib.util
+import io
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import time
+import uuid
+
+# Share the already-tested i3, atomic-file and project persistence primitives.
+loader = importlib.machinery.SourceFileLoader('project_session', str(Path(__file__).resolve().with_name('project-session')))
+spec = importlib.util.spec_from_loader(loader.name, loader)
+ps = importlib.util.module_from_spec(spec)
+loader.exec_module(ps)
+STATE = Path(os.environ.get('XDG_STATE_HOME', str(Path.home() / '.local/state'))) / 'desktop-session'
+SCRIPT = str(Path.home() / '.local/bin/desktop-session')
+OBSIDIAN_IDENTITIES = {('obsidian', 'obsidian'),
+                       ('md.obsidian.Obsidian', 'md.obsidian.obsidian')}
+
+
+def nodes(root):
+    yield root
+    for child in root.get('nodes', []) + root.get('floating_nodes', []):
+        yield from nodes(child)
+
+
+def ordinary(root):
+    return [n for n in nodes(root) if n.get('type') == 'workspace' and
+            n['name'] not in {'6', '7', '__i3_scratch'} and not n['name'].startswith('_proj_') and
+            any(c.get('window') for c in nodes(n))]
+
+
+def real_windows(root):
+    return [(ws, n) for ws, n in ps.walk(root) if n.get('window_properties', {}).get('class')]
+
+
+def notify(title, message, error=False):
+    if shutil.which('notify-send'):
+        try:
+            subprocess.run(['notify-send', '-u', 'critical' if error else 'normal', '-t', '15000' if error else '7000', title, message],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3, check=False)
+        except (OSError, subprocess.SubprocessError) as failure:
+            print(f'Notification unavailable: {failure}', file=sys.stderr)
+
+
+def command(*args, timeout=30):
+    result = subprocess.run(args, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout)
+    if result.returncode:
+        raise RuntimeError(f"{args[0]} failed: {result.stderr.strip() or result.stdout.strip()}")
+    return result.stdout
+
+
+def pointer():
+    current = ps.read_json(STATE / 'current.json')
+    if not current:
+        return None, None
+    generation = current['generation']
+    if not re.fullmatch(r'[0-9]{8}T[0-9]{6}-[a-f0-9]{8}', generation):
+        raise RuntimeError('Invalid desktop snapshot pointer')
+    folder = STATE / 'snapshots' / generation
+    manifest = ps.read_json(folder / 'manifest.json')
+    if not manifest or manifest.get('version') != 1:
+        raise RuntimeError('Invalid desktop snapshot manifest')
+    # Validate all required files and commands before mutating the desktop.
+    for index, workspace in enumerate(manifest['workspaces']):
+        if workspace['name'] in {'6', '7', '__i3_scratch'} or workspace['name'].startswith('_proj_'):
+            raise RuntimeError('Desktop snapshot overlaps project workspaces')
+        ps.read_json(folder / f'{index}.layout.json') or (_ for _ in ()).throw(RuntimeError('Missing layout'))
+        for app in workspace['apps']:
+            if not app['command'] or not all(isinstance(a, str) for a in app['command']):
+                raise RuntimeError('Invalid saved application command')
+    return folder, manifest
+
+
+def topology(root):
+    return [(w['name'], [(n.get('window'), {k: n.get('window_properties', {}).get(k) for k in ['class', 'instance']})
+                         for n in nodes(w) if n.get('window')]) for w in ordinary(root)]
+
+
+def app_command(command_line, properties):
+    # Versioned Electron/Python executable paths become stale after upgrades.
+    # These desktop launchers reopen the app's own saved documents/session.
+    launchers = {'Brave-browser': 'brave', 'Google-chrome': 'google-chrome-stable',
+                 'obsidian': 'obsidian', 'md.obsidian.Obsidian': 'obsidian',
+                 'cursor': 'cursor', 'Anki': 'anki', 'keepassxc': 'keepassxc', 'KeePassXC': 'keepassxc'}
+    launcher = launchers.get(properties.get('class'))
+    if launcher and shutil.which(launcher):
+        return [launcher]
+    if not isinstance(command_line, list) or not command_line:
+        raise RuntimeError('Application has no reproducible argv command')
+    return command_line
+
+
+def save(auto=False, shutdown=False, projects_only=False):
+    desktop = ps.desktop_id()
+    ready = ps.read_json(STATE / 'restore.json', {})
+    frozen = ps.read_json(STATE / 'shutdown.json', {})
+    if frozen.get('desktop') == desktop and not shutdown:
+        if auto:
+            return
+        raise RuntimeError('Shutdown preparation is active; snapshot is frozen')
+    if ready.get('desktop') != desktop or not ready.get('complete'):
+        if auto:
+            return
+        raise RuntimeError('Desktop restore is incomplete; run desktop-session restore or check desktop-session status')
+    if projects_only:
+        with open(ps.LOCK, 'a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            ps.save(auto=auto)
+        return
+    before = ps.tree()
+    if not real_windows(before):
+        raise RuntimeError('Desktop is empty; keeping the previous snapshot')
+    source_windows = sorted(n['window'] for _, n in real_windows(before))
+    # Full snapshots may be hours old now that periodic saves capture projects
+    # only. Compare topology before/after this capture, not against an old
+    # snapshot whose applications may have been deliberately closed.
+    generation = time.strftime('%Y%m%dT%H%M%S') + '-' + uuid.uuid4().hex[:8]
+    folder = STATE / 'snapshots' / generation
+    folder.mkdir(parents=True, mode=0o700)
+    manifest = {'version': 1, 'generation': generation, 'desktop': desktop, 'source_windows': source_windows,
+                'saved_at': time.strftime('%Y-%m-%d %H:%M:%S%z'), 'workspaces': []}
+    try:
+        # Same lock as project switches and project saves. No nested CLI lock.
+        with open(ps.LOCK, 'a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            project_windows = ps.project_windows(before)
+            if project_windows:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    ps.save(expected_windows=ps.signature(project_windows))
+            _, projects = ps.snapshot()
+            manifest['projects'] = ps.summary(projects) if projects is not None else 'No project snapshot'
+            if not project_windows:
+                manifest['projects'] += ' (unchanged; no open project windows)'
+            available = None
+            for index, ws in enumerate(ordinary(before)):
+                command('i3-resurrect', 'save', '-w', ws['name'], '-d', str(folder), '-p', str(index))
+                profile = folder / 'profiles'
+                layout = ps.read_json(profile / f'{index}_layout.json')
+                programs = ps.read_json(profile / f'{index}_programs.json')
+                live = [n for n in nodes(ws) if n.get('window')]
+                leaves = [n for n in nodes(layout) if 'swallows' in n]
+                if len(programs) != len(live) or len(leaves) != len(live):
+                    raise RuntimeError(f"Workspace {ws['name']}: incomplete application capture (or leftover restore placeholders)")
+                apps = []
+                for app_index, (node, leaf, program) in enumerate(zip(live, leaves, programs)):
+                    properties = node.get('window_properties', {})
+                    if not properties.get('class'):
+                        raise RuntimeError(f"Workspace {ws['name']} still has a restore placeholder")
+                    token = f'desktop:{generation}:{index}:{app_index}'
+                    leaf['marks'] = [token]
+                    argv = app_command(program['command'], properties)
+                    if 'kitty' in properties['class'].lower():
+                        if available is None:
+                            available = ps.kitty_windows()
+                        if node['window'] not in available:
+                            raise RuntimeError('Non-project Kitty cannot be reached')
+                        socket, oswindow = available[node['window']]
+                        panes = {w['id']: ps.pane_info(w) for tab in oswindow['tabs'] for w in tab['windows']}
+                        native = folder / 'native.tmp'
+                        import shlex
+                        ps.rc(socket, 'action', 'save_as_session ' + shlex.join(['--save-only', '--match', ' or '.join(f'id:{wid}' for wid in panes), str(native)]))
+                        session = ps.safe_session(native.read_text(), panes)
+                        native.unlink()
+                        after = next(w for w in json.loads(ps.rc(socket, 'ls')) if w['id'] == oswindow['id'])
+                        after_panes = {w['id']: ps.pane_info(w) for tab in after['tabs'] for w in tab['windows']}
+                        if after_panes != panes or [t['id'] for t in after['tabs']] != [t['id'] for t in oswindow['tabs']]:
+                            raise RuntimeError('Non-project Kitty tabs changed during capture; retry')
+                        session_path = folder / f'{index}-{app_index}.kitty-session'
+                        session_path.write_text(session)
+                        # Unique class prevents the ordinary Kitty placeholder
+                        # from swallowing project-switch's independently owned windows.
+                        cls = f'kitty-desktop-{generation}-{index}-{app_index}'
+                        argv = ['kitty', '--class', cls, '--name', cls, '--session', str(session_path)]
+                        leaf['swallows'] = [{'class': '^' + re.escape(cls) + '$'}]
+                    apps.append({'token': token, 'command': argv, 'cwd': program['working_directory'],
+                                 'properties': {k: properties[k] for k in ['class', 'instance'] if k in properties},
+                                 'swallows': leaf['swallows']})
+                # Native append_layout only needs the workspace's children.
+                ps.atomic_json(folder / f'{index}.layout.json', layout.get('nodes', []) + layout.get('floating_nodes', []))
+                manifest['workspaces'].append({'name': ws['name'], 'layout': ws.get('layout', 'splith'), 'apps': apps})
+            after = ps.tree()
+            if topology(after) != topology(before) or sorted(n['window'] for _, n in real_windows(after)) != source_windows:
+                raise RuntimeError('Desktop windows changed during capture; retry')
+            shutil.rmtree(folder / 'profiles', ignore_errors=True)
+            manifest['windows'] = sum(len(w['apps']) for w in manifest['workspaces'])
+            manifest['saved_at'] = time.strftime('%Y-%m-%d %H:%M:%S%z')
+            ps.atomic_json(folder / 'manifest.json', manifest)
+    except BaseException:
+        shutil.rmtree(folder)
+        raise
+    # fsync all Kitty files before publishing the directory generation.
+    for file in folder.iterdir():
+        with file.open('rb') as stream:
+            os.fsync(stream.fileno())
+    ps.sync_dir(folder)
+    ps.atomic_json(STATE / 'current.json', {'generation': generation})
+    for old in sorted((STATE / 'snapshots').iterdir(), reverse=True)[10:]:
+        shutil.rmtree(old)
+    message = summary(manifest)
+    ps.atomic_json(STATE / 'last-save.json', {'ok': True, 'message': message, 'time': time.time()})
+    print(message, flush=True)
+    if not auto:
+        notify('Desktop session saved', message)
+
+
+def summary(manifest):
+    return (f"{manifest['saved_at']}: {len(manifest['workspaces'])} desktop workspaces, "
+            f"{manifest['windows']} application windows. {manifest['projects']}")
+
+
+def obsidian_identity(properties):
+    return (properties.get('class'), properties.get('instance')) in OBSIDIAN_IDENTITIES
+
+
+def matching(properties, app):
+    if obsidian_identity(properties) and obsidian_identity(app['properties']):
+        return all(properties.get(k) == v for k, v in app['properties'].items()
+                   if k not in {'class', 'instance'})
+    return all(properties.get(k) == v for k, v in app['properties'].items())
+
+
+def compatible_layout(layout, apps):
+    # Upgrade a private working copy, keeping the original snapshot immutable.
+    layout = json.loads(json.dumps(layout))
+    for app in apps:
+        if not obsidian_identity(app['properties']):
+            continue
+        for leaf in nodes({'nodes': layout}):
+            if app['token'] not in leaf.get('marks', []):
+                continue
+            criteria = []
+            for swallow in leaf.get('swallows', []):
+                for cls, instance in sorted(OBSIDIAN_IDENTITIES):
+                    criteria.append(dict(swallow, **{'class': '^' + re.escape(cls) + '$',
+                                                     'instance': '^' + re.escape(instance) + '$'}))
+            leaf['swallows'] = criteria
+    return layout
+
+
+def filled(app):
+    return next((n for _, n in real_windows(ps.tree()) if app['token'] in n.get('marks', [])), None)
+
+
+def adopt_existing(app):
+    if filled(app):
+        return True
+    # Applications can autostart before this helper, or one browser invocation
+    # can reopen several windows. Adopt these instead of launching duplicates.
+    for ws, n in real_windows(ps.tree()):
+        if ws in {'6', '7', '__i3_scratch'} or ws.startswith('_proj_'):
+            continue
+        if any(m.startswith(('desktop:', 'proj:')) for m in n.get('marks', [])):
+            continue
+        if matching(n.get('window_properties', {}), app):
+            # A native placeholder can swallow an existing window after remap.
+            # Make its class match for restored ordinary Kitty windows as well.
+            if app['command'][0] == 'kitty':
+                cls = app['command'][app['command'].index('--class') + 1]
+                command('xdotool', 'set_window', '--class', cls, '--classname', cls, str(n['window']))
+            try:
+                command('xdotool', 'windowunmap', str(n['window']))
+            finally:
+                command('xdotool', 'windowmap', str(n['window']))
+            for _ in range(20):
+                if filled(app):
+                    return True
+                time.sleep(.05)
+    return False
+
+
+def alive(record):
+    try:
+        # PID alone is unsafe after reuse; compare kernel start time too.
+        stat = Path(f"/proc/{record['pid']}/stat").read_text().rsplit(')', 1)[1].split()
+        return (stat[0] != 'Z' and stat[19] == record['start'] and
+                record.get('boot') == Path('/proc/sys/kernel/random/boot_id').read_text().strip())
+    except (OSError, KeyError):
+        return False
+
+
+def start_app(app, record_path):
+    # The small launcher writes its PID/start identity before exec, so a retry
+    # after parent interruption can see whether the application is still alive.
+    argv = list(app['command'])
+    if argv[0] in {'brave', 'google-chrome-stable'} and any(matching(n.get('window_properties', {}), app) for _, n in real_windows(ps.tree())):
+        argv.append('--new-window')
+    subprocess.Popen([SCRIPT, 'launch', '--record', str(record_path), '--cwd', app['cwd'], '--', *argv],
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     start_new_session=True, close_fds=True)
+
+
+def restore():
+    desktop = ps.desktop_id()
+    journal = ps.read_json(STATE / 'restore.json', {})
+    if journal.get('desktop') == desktop and journal.get('complete'):
+        command(str(Path.home() / '.local/bin/project-switch'), 'startup')
+        print('Desktop already initialized; no applications relaunched')
+        return
+    folder, manifest = pointer()
+    if journal.get('desktop') != desktop:
+        # Initial installation on a live desktop must never overlay old state.
+        if manifest is None:
+            command(str(Path.home() / '.local/bin/project-switch'), 'startup')
+            ps.atomic_json(STATE / 'restore.json', {'desktop': desktop, 'complete': True})
+            print('Desktop initialized; no previous desktop snapshot')
+            return
+        journal = {'desktop': desktop, 'complete': False, 'generation': manifest['generation'], 'layouts': [], 'done': []}
+        ps.atomic_json(STATE / 'restore.json', journal)
+    if manifest is None or manifest['generation'] != journal.get('generation'):
+        raise RuntimeError('Snapshot changed during an incomplete restore')
+    original_focus = next((n['id'] for _, n in real_windows(ps.tree()) if n.get('focused')), None)
+    launch_dir = STATE / 'launches' / manifest['generation']
+    launch_dir.mkdir(parents=True, exist_ok=True)
+    # Install all placeholders before launching any app: browsers can restore
+    # multiple windows on different workspaces in a single invocation.
+    for index, ws in enumerate(manifest['workspaces']):
+        if index in journal['layouts']:
+            continue
+        tokens = {a['token'] for a in ws['apps']}
+        if not any(tokens.intersection(n.get('marks', [])) for n in nodes(ps.tree())):
+            ps.i3('workspace --no-auto-back-and-forth ' + json.dumps(ws['name']))
+            workspace_node = next(n for n in nodes(ps.tree()) if n.get('type') == 'workspace' and n['name'] == ws['name'])
+            target = f"[con_id={workspace_node['id']}] "
+            mode = ws['layout'] if ws['layout'] in {'splith', 'splitv', 'stacked', 'tabbed'} else 'splith'
+            ps.i3(target + 'layout ' + mode)
+            layout_path = launch_dir / f'{index}.layout.json'
+            ps.atomic_json(layout_path, compatible_layout(ps.read_json(folder / f'{index}.layout.json'), ws['apps']))
+            ps.i3(target + 'append_layout ' + json.dumps(str(layout_path)))
+        journal['layouts'].append(index)
+        ps.atomic_json(STATE / 'restore.json', journal)
+    missing = []
+    for index, ws in enumerate(manifest['workspaces']):
+        for app_index, app in enumerate(ws['apps']):
+            if app['token'] in journal['done']:
+                continue
+            if not adopt_existing(app):
+                record_path = launch_dir / f'{index}-{app_index}.json'
+                record = ps.read_json(record_path, {})
+                if not alive(record):
+                    start_app(app, record_path)
+                deadline = time.monotonic() + 20
+                while time.monotonic() < deadline:
+                    if adopt_existing(app):
+                        break
+                    time.sleep(.25)
+                else:
+                    missing.append(app['properties'].get('class', app['command'][0]))
+                    continue
+            journal['done'].append(app['token'])
+            ps.atomic_json(STATE / 'restore.json', journal)
+    # Project restore has independent retry state; its exact conversations are
+    # not blocked by an ordinary application that is no longer installed.
+    command(str(Path.home() / '.local/bin/project-switch'), 'startup', timeout=180)
+    if original_focus and any(n['id'] == original_focus for _, n in real_windows(ps.tree())):
+        ps.i3(f'[con_id={original_focus}] focus')
+    if missing:
+        raise RuntimeError('Restore incomplete: ' + ', '.join(missing) + '. Retry with desktop-session restore; autosave is paused.')
+    journal['complete'] = True
+    ps.atomic_json(STATE / 'restore.json', journal)
+    print('Desktop restore verified: ' + summary(manifest), flush=True)
+    notify('Desktop session restored', f"{manifest['windows']} application windows and saved projects restored")
+
+
+def status():
+    _, manifest = pointer()
+    text = summary(manifest) if manifest else 'No complete desktop snapshot yet'
+    journal = ps.read_json(STATE / 'restore.json', {})
+    last = ps.read_json(STATE / 'last-save.json', {})
+    if journal and not journal.get('complete'):
+        text += '\nRestore incomplete; automatic project saves are paused. Run desktop-session restore.'
+    if last and not last.get('ok'):
+        text += '\nLast save FAILED: ' + last['message']
+    print(text + '\nSnapshots: ' + str(STATE / 'snapshots'))
+    return text
+
+
+def power(action):
+    save()
+    ps.atomic_json(STATE / 'shutdown.json', {'desktop': ps.desktop_id(), 'time': time.time()})
+    try:
+        if action == 'logout':
+            ps.i3('exit')
+        else:
+            command('systemctl', 'reboot' if action == 'reboot' else 'poweroff')
+    except BaseException:
+        (STATE / 'shutdown.json').unlink(missing_ok=True)
+        raise
+
+
+def watch_shutdown():
+    # Existing system packages; imported only by the lifecycle service.
+    import dbus
+    from dbus.mainloop.glib import DBusGMainLoop
+    from gi.repository import GLib
+    DBusGMainLoop(set_as_default=True)
+    bus = dbus.SystemBus()
+    obj = bus.get_object('org.freedesktop.login1', '/org/freedesktop/login1')
+    manager = dbus.Interface(obj, 'org.freedesktop.login1.Manager')
+    props = dbus.Interface(obj, 'org.freedesktop.DBus.Properties')
+    delay = float(props.Get('org.freedesktop.login1.Manager', 'InhibitDelayMaxUSec')) / 1000000
+    inhibitor = [None]
+    def acquire():
+        inhibitor[0] = manager.Inhibit('shutdown', 'Desktop session snapshots', 'Save i3 windows and Codex sessions before shutdown', 'delay').take()
+    def prepare(active):
+        if not active:
+            (STATE / 'shutdown.json').unlink(missing_ok=True)
+            acquire()
+            return
+        try:
+            desktop = ps.desktop_id()
+            frozen = ps.read_json(STATE / 'shutdown.json', {})
+            ps.atomic_json(STATE / 'shutdown.json', {'desktop': desktop, 'time': time.time()})
+            if frozen.get('desktop') != desktop:
+                # Power-menu actions already captured a complete snapshot.
+                subprocess.run([SCRIPT, 'save', '--auto', '--shutdown'], timeout=max(.1, delay - .5), check=True)
+        except Exception as error:
+            print(f'Final shutdown save did not finish; retaining last complete snapshot: {error}', flush=True)
+        finally:
+            if inhibitor[0] is not None:
+                os.close(inhibitor[0])
+                inhibitor[0] = None
+    bus.add_signal_receiver(prepare, signal_name='PrepareForShutdown', dbus_interface='org.freedesktop.login1.Manager', path='/org/freedesktop/login1')
+    acquire()
+    print(f'Watching shutdown/reboot; delay budget {delay:g}s', flush=True)
+    GLib.MainLoop().run()
+
+
+def main():
+    # User services do not source zshrc. Include pipx/user launchers for both
+    # capture and restored applications, even with systemd's minimal PATH.
+    os.environ['PATH'] = os.pathsep.join(dict.fromkeys([
+        str(Path.home() / '.local/bin'), str(Path.home() / 'bin'),
+        *os.environ.get('PATH', os.defpath).split(os.pathsep)]))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('action', choices=['save', 'startup', 'restore', 'status', 'power', 'watch-shutdown', 'launch'])
+    parser.add_argument('power_action', nargs='?', choices=['reboot', 'shutdown', 'logout'])
+    parser.add_argument('--auto', action='store_true')
+    parser.add_argument('--projects-only', action='store_true', help='Save project windows only; retain the last full-desktop snapshot')
+    parser.add_argument('--shutdown', action='store_true')
+    parser.add_argument('--notify', action='store_true')
+    parser.add_argument('--record')
+    parser.add_argument('--cwd')
+    tokens = sys.argv[1:]
+    extra = []
+    if tokens and tokens[0] == 'launch' and '--' in tokens:
+        boundary = tokens.index('--')
+        tokens, extra = tokens[:boundary], tokens[boundary + 1:]
+    args = parser.parse_args(tokens)
+    os.umask(0o077)
+    STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if args.action == 'launch':
+        argv = extra
+        if not argv or not args.record:
+            raise RuntimeError('Missing application launch arguments')
+        stat = Path('/proc/self/stat').read_text().rsplit(')', 1)[1].split()
+        ps.atomic_json(Path(args.record), {'pid': os.getpid(), 'start': stat[19],
+                                          'boot': Path('/proc/sys/kernel/random/boot_id').read_text().strip()})
+        os.chdir(args.cwd if args.cwd and Path(args.cwd).is_dir() else Path.home())
+        os.execvp(argv[0], argv)
+    if extra:
+        parser.error('Unexpected arguments: ' + ' '.join(extra))
+    if args.action == 'watch-shutdown':
+        watch_shutdown()
+        return
+    with (STATE / 'session.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            if args.action == 'save':
+                try:
+                    save(args.auto, args.shutdown, projects_only=args.projects_only)
+                except (subprocess.SubprocessError, RuntimeError):
+                    # A timer outside an active graphical login has nothing to save.
+                    if args.auto:
+                        try:
+                            ps.desktop_id()
+                        except (subprocess.SubprocessError, RuntimeError):
+                            return
+                    raise
+            elif args.action in {'startup', 'restore'}:
+                command('systemctl', '--user', 'import-environment', 'DISPLAY', 'XAUTHORITY', 'I3SOCK')
+                command('systemctl', '--user', 'restart', 'desktop-session-shutdown.service')
+                restore()
+            elif args.action == 'status':
+                text = status()
+                if args.notify:
+                    notify('Desktop session status', text)
+            elif args.action == 'power':
+                if not args.power_action:
+                    parser.error('power requires reboot, shutdown or logout')
+                power(args.power_action)
+        except BaseException as error:
+            if isinstance(error, (KeyboardInterrupt, SystemExit)):
+                raise
+            if args.action in {'save', 'power'}:
+                ps.atomic_json(STATE / 'last-save.json', {'ok': False, 'message': str(error), 'time': time.time()})
+            notify('Desktop session ' + ('save failed' if args.action in {'save', 'power'} else 'needs attention'), str(error), error=True)
+            raise
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (OSError, RuntimeError, ValueError, KeyError, subprocess.SubprocessError) as error:
+        print(f'desktop-session: {error}', file=sys.stderr, flush=True)
+        sys.exit(1)
