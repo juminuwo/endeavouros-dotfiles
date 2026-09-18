@@ -116,6 +116,17 @@ focus_tab 0
         self.assertEqual(pointer, (self.state / "current.json").read_bytes())
         self.assertEqual(list((self.state / "snapshots").iterdir()), [folder])
 
+    def test_pending_conversation_preserves_snapshot_during_either_capture_pass(self):
+        folder, _ = self.snapshot()
+        pointer = (self.state / "current.json").read_bytes()
+        for results in ([ps.CodexSessionPending('pending')],
+                        [{"cwd": "/tmp"}, ps.CodexSessionPending('pending')]):
+            with patch.object(ps, 'pane_info', side_effect=results):
+                with self.assertRaises(ps.CodexSessionPending):
+                    self.capture()
+            self.assertEqual(pointer, (self.state / "current.json").read_bytes())
+            self.assertEqual(list((self.state / "snapshots").iterdir()), [folder])
+
     def test_no_projects_preserves_previous_generation(self):
         self.snapshot()
         pointer = (self.state / "current.json").read_bytes()
@@ -272,8 +283,20 @@ focus_tab 0
         other = Path(self.tmp.name) / "rollout-other.jsonl"
         other.write_text(root.read_text().replace(sid, "01a073ba-4300-7ae0-9c41-77ccaebc9374"))
         with patch.object(Path, "iterdir", return_value=iter([root, other])):
-            with self.assertRaisesRegex(RuntimeError, "Cannot identify one main"):
+            with self.assertRaisesRegex(RuntimeError, "Cannot identify one main") as raised:
                 ps.codex_session(123)
+            self.assertNotIsInstance(raised.exception, ps.CodexSessionPending)
+
+    def test_codex_without_rollout_is_pending_but_corrupt_rollout_is_error(self):
+        with patch.object(Path, 'iterdir', return_value=iter([])):
+            with self.assertRaises(ps.CodexSessionPending):
+                ps.codex_session(123)
+        bad = Path(self.tmp.name) / 'rollout-bad.jsonl'
+        bad.write_text('invalid json')
+        with patch.object(Path, 'iterdir', return_value=iter([bad])):
+            with self.assertRaises(RuntimeError) as raised:
+                ps.codex_session(123)
+            self.assertNotIsInstance(raised.exception, ps.CodexSessionPending)
 
 
 if __name__ == "__main__":

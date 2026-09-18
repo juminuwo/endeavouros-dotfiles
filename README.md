@@ -98,7 +98,9 @@ project-only timer is disabled by `host-install`.
   have saved a newer independent snapshot before an ordinary capture failed.
 - **Status:** Alt+Y → **[ session save status ]**, the power menu's
   **Session save status**, or `desktop-session status`. Status includes the last
-  complete snapshot, last save failure if any, and incomplete restore state.
+  complete desktop snapshot, latest project-save result (including deferrals),
+  last-attempt failure if any, and incomplete restore state. A committed project
+  save clears an earlier attempt's error without advancing the desktop snapshot.
 - **Power menu:** reboot, shutdown and logout all save first and abort if saving
   fails. The old separate Save & Shutdown choice is no longer needed.
 - **Other reboot/shutdown requests:** `desktop-session-shutdown.service` holds a
@@ -146,6 +148,11 @@ are captured and restored by the whole-desktop coordinator described above.
 
 - Autosave: projects only, every five minutes via `desktop-session-save.timer` (up to five seconds
   timer slack). It starts saving only after i3 startup/restore completes.
+  If a foreground Codex has not opened a conversation file yet, autosave defers
+  the entire capture, retains the previous snapshot, and retries on the next
+  timer tick without a failure notification. Send the first prompt or close an
+  unused Codex tab to allow capture. Ambiguous or invalid conversation files
+  remain errors; manual and shutdown saves still reject incomplete captures.
 - Restore: i3 runs `restore_i3_session.sh` on login, coordinating ordinary
   applications and `project-switch startup`. Saved projects are restored before
   default bootstrap. Repeated startup in the same i3 session leaves live

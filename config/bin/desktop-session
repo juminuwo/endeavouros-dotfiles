@@ -115,7 +115,10 @@ def save(auto=False, shutdown=False, projects_only=False):
     if projects_only:
         with open(ps.LOCK, 'a') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
-            ps.save(auto=auto)
+            manifest = ps.save(auto=auto)
+        if manifest is not None:
+            ps.atomic_json(STATE / 'last-save.json', {'ok': True, 'scope': 'projects',
+                           'message': ps.summary(manifest), 'time': time.time()})
         return
     before = ps.tree()
     if not real_windows(before):
@@ -378,8 +381,12 @@ def status():
     last = ps.read_json(STATE / 'last-save.json', {})
     if journal and not journal.get('complete'):
         text += '\nRestore incomplete; automatic project saves are paused. Run desktop-session restore.'
-    if last and not last.get('ok'):
+    if last.get('deferred'):
+        text += '\nProject autosave deferred; previous snapshot retained: ' + last['message']
+    elif last and not last.get('ok'):
         text += '\nLast save FAILED: ' + last['message']
+    elif last.get('scope') == 'projects':
+        text += '\nLast project save: ' + last['message']
     print(text + '\nSnapshots: ' + str(STATE / 'snapshots'))
     return text
 
@@ -478,6 +485,15 @@ def main():
             if args.action == 'save':
                 try:
                     save(args.auto, args.shutdown, projects_only=args.projects_only)
+                except ps.CodexSessionPending as error:
+                    if not (args.auto and args.projects_only and not args.shutdown):
+                        raise
+                    # No partial snapshot is published. The timer retries after
+                    # the new conversation starts; manual/power saves still fail.
+                    ps.atomic_json(STATE / 'last-save.json', {'ok': False, 'deferred': True,
+                                   'scope': 'projects', 'message': str(error), 'time': time.time()})
+                    print(f'Project autosave deferred; previous snapshot retained: {error}', flush=True)
+                    return
                 except (subprocess.SubprocessError, RuntimeError):
                     # A timer outside an active graphical login has nothing to save.
                     if args.auto:

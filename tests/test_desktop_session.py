@@ -99,18 +99,61 @@ class DesktopTests(unittest.TestCase):
                 ds.save()
         self.assertEqual(original, (self.state / 'current.json').read_bytes())
 
-    def test_project_autosave_keeps_entire_desktop_snapshot_and_status(self):
+    def test_project_autosave_keeps_desktop_snapshot_and_clears_stale_failure(self):
         self.capture()
-        original = {name: (self.state / name).read_bytes()
-                    for name in ['current.json', 'last-save.json']}
+        original = (self.state / 'current.json').read_bytes()
+        ds.ps.atomic_json(self.state / 'last-save.json', {'ok': False, 'message': 'old failure'})
         self.notify.reset_mock()
-        with patch.object(ds.ps, 'save') as projects, patch.object(ds, 'command') as command:
+        manifest = {'saved_at': 'now', 'windows': []}
+        with patch.object(ds.ps, 'save', return_value=manifest) as projects, patch.object(ds, 'command') as command:
             ds.save(auto=True, projects_only=True)
         projects.assert_called_once_with(auto=True)
         command.assert_not_called()
         self.notify.assert_not_called()
-        for name, data in original.items():
-            self.assertEqual((self.state / name).read_bytes(), data)
+        self.assertEqual((self.state / 'current.json').read_bytes(), original)
+        self.assertTrue(ds.ps.read_json(self.state / 'last-save.json')['ok'])
+        with contextlib.redirect_stdout(io.StringIO()):
+            status = ds.status()
+        self.assertNotIn('FAILED', status)
+        self.assertIn('Last project save: Saved now', status)
+
+    def test_skipped_project_save_does_not_clear_failure(self):
+        last = {'ok': False, 'message': 'previous failure'}
+        ds.ps.atomic_json(self.state / 'last-save.json', last)
+        with patch.object(ds.ps, 'save', return_value=None):
+            ds.save(auto=True, projects_only=True)
+        self.assertEqual(ds.ps.read_json(self.state / 'last-save.json'), last)
+
+    def test_pending_autosave_is_deferred_but_manual_and_shutdown_saves_fail(self):
+        self.capture()
+        original = (self.state / 'current.json').read_bytes()
+        for options in (['--auto', '--projects-only'], ['--projects-only'], [],
+                        ['--auto', '--shutdown'], ['--auto', '--projects-only', '--shutdown']):
+            self.notify.reset_mock()
+            with patch.object(sys, 'argv', [str(SCRIPT), 'save', *options]), \
+                 patch.object(ds, 'save', side_effect=ds.ps.CodexSessionPending('pending')), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                if options == ['--auto', '--projects-only']:
+                    ds.main()
+                    self.notify.assert_not_called()
+                    record = ds.ps.read_json(self.state / 'last-save.json')
+                    self.assertTrue(record['deferred'])
+                    self.assertFalse(record['ok'])
+                    self.assertIn('autosave deferred', ds.status())
+                else:
+                    with self.assertRaises(ds.ps.CodexSessionPending):
+                        ds.main()
+                    self.notify.assert_called_once()
+                    self.assertFalse(ds.ps.read_json(self.state / 'last-save.json')['ok'])
+            self.assertEqual((self.state / 'current.json').read_bytes(), original)
+
+    def test_real_autosave_error_remains_failure(self):
+        with patch.object(sys, 'argv', [str(SCRIPT), 'save', '--auto', '--projects-only']), \
+             patch.object(ds, 'save', side_effect=RuntimeError('ambiguous conversation')):
+            with self.assertRaisesRegex(RuntimeError, 'ambiguous'):
+                ds.main()
+        self.assertFalse(ds.ps.read_json(self.state / 'last-save.json')['ok'])
+        self.notify.assert_called_once()
 
     def test_project_autosave_skips_incomplete_restore_and_shutdown(self):
         with patch.object(ds.ps, 'save') as projects:

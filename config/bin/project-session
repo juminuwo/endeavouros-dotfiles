@@ -142,6 +142,10 @@ def kitty_windows():
     return result
 
 
+class CodexSessionPending(RuntimeError):
+    """A foreground Codex has not opened its conversation file yet."""
+
+
 def codex_session(pid):
     """Resolve only this process's main conversation, never latest-by-cwd.
 
@@ -149,11 +153,13 @@ def codex_session(pid):
     missing/ambiguous root aborts this save and leaves the prior snapshot intact.
     """
     roots = {}
+    saw_rollout = False
     for fd in Path(f"/proc/{pid}/fd").iterdir():
         try:
             target = fd.resolve(strict=True)
             if not target.name.startswith("rollout-") or target.suffix != ".jsonl":
                 continue
+            saw_rollout = True
             with target.open() as stream:
                 event = json.loads(stream.readline())
             meta = event.get("payload", {})
@@ -162,6 +168,8 @@ def codex_session(pid):
                 roots[sid] = {"id": sid, "cwd": meta["cwd"]}
         except (OSError, ValueError, KeyError):
             continue
+    if not roots and not saw_rollout:
+        raise CodexSessionPending(f"Codex PID {pid} has no saved conversation yet; send its first prompt or close the unused tab")
     if len(roots) != 1:
         raise RuntimeError(f"Cannot identify one main Codex conversation for PID {pid}; retry after it finishes starting")
     session = next(iter(roots.values()))
@@ -291,6 +299,7 @@ def save(auto=False, expected_windows=None):
     for old in generations[10:]:
         shutil.rmtree(old)
     print(summary(manifest))
+    return manifest
 
 
 def summary(manifest):
