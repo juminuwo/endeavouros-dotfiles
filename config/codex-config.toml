@@ -1,5 +1,5 @@
-model = "gpt-6-astra"
-model_reasoning_effort = "medium"
+model = "gpt-5.6-terra"
+model_reasoning_effort = "low"
 approvals_reviewer = "user"
 sandbox_mode = "danger-full-access"
 approval_policy = "never"
@@ -64,6 +64,9 @@ trust_level = "trusted"
 [projects."/home/howis/git/interview-exercises"]
 trust_level = "trusted"
 
+[projects."/mnt/Main/AV"]
+trust_level = "trusted"
+
 [tui]
 session_picker_view = "comfortable"
 status_line = ["model-with-reasoning", "current-dir", "project-name", "git-branch", "permissions", "approval-mode"]
@@ -88,17 +91,6 @@ command = "npx"
 args = ["-y", "chrome-devtools-mcp@latest", "--autoConnect"]
 startup_timeout_sec = 30.0
 tool_timeout_sec = 120.0
-
-[mcp_servers.zen-browser]
-command = "/home/howis/.nvm/versions/node/v25.2.1/bin/node"
-args = ["/home/howis/git/zen-mcp/server.mjs"]
-startup_timeout_sec = 10.0
-tool_timeout_sec = 120.0
-
-[mcp_servers.zen-browser.env]
-ZEN_COMMAND = "/usr/bin/zen-browser"
-ZEN_DEBUG_PORT = "9223"
-ZEN_LAUNCH_HINT = "ZEN_DEBUG_PORT=9223 /home/howis/git/zen-mcp/launch-zen.sh"
 
 [mcp_servers.linear]
 url = "https://mcp.linear.app/mcp"
