@@ -146,6 +146,18 @@ hidden `_proj_*` workspaces), including inactive projects, tabs, split layouts,
 working directories and exact running Codex conversation IDs. Other workspaces
 are captured and restored by the whole-desktop coordinator described above.
 
+Codex versions using the shared app-server daemon are identified through each
+terminal process's owned loopback socket and the daemon's `codex_tui` connection
+metadata. The saver checks persisted conversation identity and rechecks the live
+mapping before publishing. Subagents are excluded; ambiguous mappings fail and
+retain the previous snapshot. Unused startup threads left behind after resuming
+are excluded only when the server confirms they never received a user message;
+that check runs again before publication. Older Codex versions still use their open rollout
+files, including standalone `codex exec` tasks. Those tasks restore with
+`codex resume <conversation-id>`; their original prompts are never replayed.
+The helper uses Python's standard library and does not restart Codex or
+send prompts to conversations.
+
 - Autosave: projects only, every five minutes via `desktop-session-save.timer` (up to five seconds
   timer slack). It starts saving only after i3 startup/restore completes.
   If a foreground Codex has not opened a conversation file yet, autosave defers

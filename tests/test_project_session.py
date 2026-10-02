@@ -288,7 +288,9 @@ focus_tab 0
             self.assertNotIsInstance(raised.exception, ps.CodexSessionPending)
 
     def test_codex_without_rollout_is_pending_but_corrupt_rollout_is_error(self):
-        with patch.object(Path, 'iterdir', return_value=iter([])):
+        with patch.object(Path, 'iterdir', return_value=iter([])), \
+             patch.object(Path, 'read_bytes', return_value=b''), \
+             patch.object(ps.codex_state, 'resolve', return_value=None):
             with self.assertRaises(ps.CodexSessionPending):
                 ps.codex_session(123)
         bad = Path(self.tmp.name) / 'rollout-bad.jsonl'
@@ -297,6 +299,59 @@ focus_tab 0
             with self.assertRaises(RuntimeError) as raised:
                 ps.codex_session(123)
             self.assertNotIsInstance(raised.exception, ps.CodexSessionPending)
+
+    def test_exec_rollout_is_saved_by_id_without_replaying_its_prompt(self):
+        sid = '01a0fc2c-6e6e-7201-9769-5cadb022f1f2'
+        root = Path(self.tmp.name) / 'rollout-exec.jsonl'
+        child = Path(self.tmp.name) / 'rollout-child.jsonl'
+        root.write_text(json.dumps({'type': 'session_meta', 'payload': {
+            'id': sid, 'cwd': '/repo', 'source': 'exec'}}))
+        child.write_text(json.dumps({'type': 'session_meta', 'payload': {
+            'id': '01a073ba-4300-7ae0-9c41-77ccaebc9374', 'cwd': '/repo',
+            'source': {'subagent': {}}}}))
+        window = {'id': 1, 'cwd': '/repo', 'foreground_processes': [
+            {'pid': 123, 'cmdline': ['/usr/bin/codex', 'exec', 'original task prompt']}]}
+        with patch.object(Path, 'iterdir', return_value=iter([child, root])), \
+             patch.object(Path, 'read_bytes', return_value=b''):
+            info = ps.pane_info(window)
+        self.assertEqual(info['codex'], {'id': sid, 'cwd': '/repo'})
+        saved = ps.safe_session('launch \'kitty-unserialize-data={"id": 1}\' codex exec original-task\n', {1: info})
+        self.assertIn('--session ' + sid, saved)
+        self.assertNotIn('original-task', saved)
+        self.assertNotIn('codex exec', saved)
+
+        # A second main conversation is ambiguous even when origins differ.
+        child.write_text(child.read_text().replace('{"subagent": {}}', '"cli"'))
+        with patch.object(Path, 'iterdir', return_value=iter([root, child])):
+            with self.assertRaisesRegex(RuntimeError, 'Cannot identify one main'):
+                ps.codex_session(123)
+
+    def test_unknown_and_subagent_only_rollouts_are_not_roots(self):
+        root = Path(self.tmp.name) / 'rollout-other.jsonl'
+        for source in ('unknown', None, {'subagent': {}}):
+            with self.subTest(source=source):
+                root.write_text(json.dumps({'type': 'session_meta', 'payload': {
+                    'id': '01a0fc2c-6e6e-7201-9769-5cadb022f1f2', 'cwd': '/repo', 'source': source}}))
+                with patch.object(Path, 'iterdir', return_value=iter([root])):
+                    with self.assertRaisesRegex(RuntimeError, 'Cannot identify one main'):
+                        ps.codex_session(123)
+
+    def test_daemon_resolution_preserves_only_custom_codex_home(self):
+        session = {'id': '01a08243-3ba4-70c1-a611-4d9470093d6a', 'cwd': '/repo'}
+        with patch.object(Path, 'iterdir', return_value=iter([])), \
+             patch.object(Path, 'read_bytes', return_value=b'CODEX_HOME=/custom\0TOKEN=secret\0'), \
+             patch.object(ps.codex_state, 'resolve', return_value=session.copy()) as resolve:
+            self.assertEqual(ps.codex_session(123), {**session, 'home': '/custom'})
+            resolve.assert_called_once_with(123, Path('/custom'))
+
+    def test_daemon_verification_failure_preserves_snapshot(self):
+        folder, _ = self.snapshot()
+        pointer = (self.state / 'current.json').read_bytes()
+        with patch.object(ps.codex_state, 'verify_capture', side_effect=RuntimeError('conversation changed')):
+            with self.assertRaisesRegex(RuntimeError, 'conversation changed'):
+                self.capture()
+        self.assertEqual(pointer, (self.state / 'current.json').read_bytes())
+        self.assertEqual(list((self.state / 'snapshots').iterdir()), [folder])
 
 
 if __name__ == "__main__":

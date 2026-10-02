@@ -81,6 +81,17 @@ class DesktopTests(unittest.TestCase):
         self.notify.assert_not_called()
         self.assertEqual(len(list((self.state / 'snapshots').iterdir())), 1)
 
+    def test_codex_verification_failure_preserves_desktop_snapshot(self):
+        self.capture()
+        original = (self.state / 'current.json').read_bytes()
+        self.notify.reset_mock()
+        with patch.object(ds.ps.codex_state, 'verify_capture', side_effect=RuntimeError('conversation changed')):
+            with self.assertRaisesRegex(RuntimeError, 'conversation changed'):
+                self.capture()
+        self.assertEqual(original, (self.state / 'current.json').read_bytes())
+        self.notify.assert_not_called()
+        self.assertEqual(len(list((self.state / 'snapshots').iterdir())), 1)
+
     def test_autosave_skips_incomplete_boot_and_shutdown(self):
         with patch.object(ds.ps, 'save') as projects:
             ds.ps.atomic_json(self.state / 'restore.json', {'desktop': 'desktop-1', 'complete': False})

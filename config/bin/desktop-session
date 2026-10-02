@@ -141,6 +141,7 @@ def save(auto=False, shutdown=False, projects_only=False):
                 with contextlib.redirect_stdout(io.StringIO()):
                     ps.save(expected_windows=ps.signature(project_windows))
             _, projects = ps.snapshot()
+            ps.codex_state.begin_capture()
             manifest['projects'] = ps.summary(projects) if projects is not None else 'No project snapshot'
             if not project_windows:
                 manifest['projects'] += ' (unchanged; no open project windows)'
@@ -197,6 +198,7 @@ def save(auto=False, shutdown=False, projects_only=False):
             shutil.rmtree(folder / 'profiles', ignore_errors=True)
             manifest['windows'] = sum(len(w['apps']) for w in manifest['workspaces'])
             manifest['saved_at'] = time.strftime('%Y-%m-%d %H:%M:%S%z')
+            ps.codex_state.verify_capture()
             ps.atomic_json(folder / 'manifest.json', manifest)
     except BaseException:
         shutil.rmtree(folder)
