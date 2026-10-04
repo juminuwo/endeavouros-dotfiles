@@ -82,6 +82,16 @@ class DiscoveryTests(unittest.TestCase):
         with patch.object(cs, 'Rpc', FakeRpc), patch.object(cs, 'persisted', return_value=True):
             self.assertEqual([r[2]['id'] for r in cs.daemon_roots(self.home)], [SID, OTHER])
 
+    def test_unfiltered_daemon_response_is_rejected(self):
+        from unittest.mock import Mock
+        rpc = Mock()
+        rpc.pages.side_effect = [[SID], [{'name': 'linear', 'httpOrigin': 'https://mcp.linear.app'}]]
+        rpc.call.return_value = {'thread': {'id': SID, 'cwd': '/repo', 'source': 'cli'}}
+        with patch.object(cs, 'Rpc', return_value=rpc), patch.object(cs, 'persisted', return_value=True):
+            with self.assertRaisesRegex(RuntimeError, 'ignored the local-only MCP filter'):
+                cs.daemon_roots(self.home)
+        rpc.close.assert_called_once()
+
     def test_persistence_requires_matching_saved_metadata(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / 'rollout.jsonl'
@@ -155,6 +165,44 @@ class DiscoveryTests(unittest.TestCase):
 
 
 class TransportTests(unittest.TestCase):
+    def rpc_stub(self, version='0.160.0'):
+        from unittest.mock import Mock
+        rpc = cs.Rpc.__new__(cs.Rpc)
+        rpc.server_version = version
+        rpc.sequence = 0
+        rpc.send = Mock()
+        rpc.receive = Mock(return_value={'id': 1, 'result': {'data': [], 'nextCursor': None}})
+        return rpc
+
+    def test_old_or_unknown_daemon_cannot_probe_remote_servers(self):
+        for version in ['0.157.1', '0.159.0', 'unknown']:
+            with self.subTest(version=version):
+                rpc = self.rpc_stub(version)
+                with self.assertRaisesRegex(RuntimeError, 'update the pinned daemon'):
+                    rpc.call('mcpServerStatus/list', {'threadId': SID, 'serverName': 'codex_tui'})
+                rpc.send.assert_not_called()
+                rpc.receive.assert_not_called()
+
+    def test_status_requests_must_be_scoped_to_local_terminal(self):
+        for params in [{}, {'threadId': SID}, {'serverName': 'codex_tui'},
+                       {'threadId': SID, 'serverName': 'linear'}]:
+            rpc = self.rpc_stub()
+            with self.assertRaisesRegex(RuntimeError, 'thread-scoped'):
+                rpc.call('mcpServerStatus/list', params)
+            rpc.send.assert_not_called()
+        rpc = self.rpc_stub()
+        rpc.call('mcpServerStatus/list', {'threadId': SID, 'serverName': 'codex_tui', 'detail': 'toolsAndAuthOnly'})
+        request = json.loads(rpc.send.call_args.args[0])
+        self.assertEqual(request['params']['serverName'], 'codex_tui')
+        self.assertEqual(request['params']['threadId'], SID)
+
+    def test_timeout_reports_method_and_thread_for_reads_and_writes(self):
+        for target in ['send', 'receive']:
+            rpc = self.rpc_stub()
+            getattr(rpc, target).side_effect = TimeoutError('timed out')
+            with self.assertRaisesRegex(RuntimeError, f'Codex thread/read .*{SID}.*timed out'):
+                rpc.call('thread/read', {'threadId': SID})
+
     def test_unix_handshake_masking_fragmentation_and_ping(self):
         import base64
         import hashlib
@@ -188,13 +236,16 @@ class TransportTests(unittest.TestCase):
                         self.assertEqual(json.loads(init)['method'], 'initialize')
                         conn.sendall(b'\x89\x01x')
                         self.assertEqual(receive(), (10, b'x'))
-                        conn.sendall(b'\x01\x08{"id":1,' + b'\x80\x0c"result":{}}')
+                        tail = b'"result":{"userAgent":"codex-tui/0.160.0 (test)"}}'
+                        conn.sendall(b'\x01\x08{"id":1,' + bytes([128, len(tail)]) + tail)
                         _, ready = receive()
                         self.assertEqual(json.loads(ready)['method'], 'initialized')
                 except BaseException as error:
                     failures.append(error)
             thread = threading.Thread(target=serve, daemon=True); thread.start()
-            rpc = cs.Rpc(path); rpc.close()
+            rpc = cs.Rpc(path)
+            self.assertEqual(rpc.server_version, '0.160.0')
+            rpc.close()
             thread.join(4)
             self.assertFalse(thread.is_alive())
             if failures: raise failures[0]

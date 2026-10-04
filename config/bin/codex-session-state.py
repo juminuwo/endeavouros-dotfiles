@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import socket
 import struct
 import time
@@ -28,6 +29,8 @@ class Rpc:
         self.sock.settimeout(8)
         self.stream = None
         self.sequence = 0
+        self.server_version = 'unknown'
+        self.operation = f'connect/handshake ({path})'
         self.deadline = time.monotonic() + 60
         try:
             self.sock.connect(str(path))
@@ -46,9 +49,14 @@ class Rpc:
             expected = base64.b64encode(hashlib.sha1((key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').encode()).digest()).decode()
             if lines[0].split()[1] != '101' or fields.get('sec-websocket-accept') != expected:
                 raise RuntimeError('Invalid Codex WebSocket handshake')
-            self.call('initialize', {'clientInfo': {'name': 'desktop-session', 'version': '1'},
-                                     'capabilities': {'experimentalApi': True}})
+            initialized = self.call('initialize', {'clientInfo': {'name': 'desktop-session', 'version': '1'},
+                                                  'capabilities': {'experimentalApi': True}})
+            agent = initialized.get('userAgent', '').split(' ', 1)[0]
+            self.server_version = agent.rsplit('/', 1)[-1]
             self.send(json.dumps({'method': 'initialized'}).encode())
+        except TimeoutError as error:
+            self.close()
+            raise RuntimeError(f'Codex {self.operation} timed out (8s socket limit)') from error
         except BaseException:
             self.close()
             raise
@@ -60,7 +68,7 @@ class Rpc:
 
     def read(self, size):
         if time.monotonic() >= self.deadline:
-            raise RuntimeError('Codex session discovery timed out')
+            raise RuntimeError(f'Codex {self.operation} exceeded the 60s discovery deadline')
         self.sock.settimeout(min(8, max(.01, self.deadline - time.monotonic())))
         data = self.stream.read(size)
         if len(data) != size:
@@ -110,14 +118,28 @@ class Rpc:
                 return json.loads(message)
 
     def call(self, method, params):
+        self.operation = method + (f" (thread {params['threadId']})" if params.get('threadId') else '')
+        if method == 'mcpServerStatus/list':
+            # The pinned daemon can lag behind the CLI. 0.157.1 ignores this
+            # filter and probes every remote MCP server's OAuth endpoints.
+            # 0.160.0 is the first version verified locally with this filter.
+            version = re.fullmatch(r'(\d+)\.(\d+)\.(\d+)(?:[-+].*)?', self.server_version)
+            if not version or tuple(map(int, version.groups())) < (0, 160, 0):
+                raise RuntimeError(f'Codex daemon {self.server_version} cannot perform local-only session discovery; '
+                                   'update the pinned daemon with: codex app-server daemon update --from-cli --yes')
+            if params.get('serverName') != 'codex_tui' or not params.get('threadId'):
+                raise RuntimeError('Session discovery requires a thread-scoped codex_tui filter')
         self.sequence += 1
-        self.send(json.dumps({'id': self.sequence, 'method': method, 'params': params}).encode())
-        while True:
-            result = self.receive()
-            if result.get('id') == self.sequence:
-                if 'error' in result:
-                    raise RpcError(method, result['error'])
-                return result['result']
+        try:
+            self.send(json.dumps({'id': self.sequence, 'method': method, 'params': params}).encode())
+            while True:
+                result = self.receive()
+                if result.get('id') == self.sequence:
+                    if 'error' in result:
+                        raise RpcError(method, result['error'])
+                    return result['result']
+        except TimeoutError as error:
+            raise RuntimeError(f'Codex {self.operation} timed out (8s socket limit)') from error
 
     def pages(self, method, params):
         params = dict(params)
@@ -174,6 +196,8 @@ def daemon_roots(home):
                 raise RuntimeError('Invalid Codex conversation directory')
             for server in rpc.pages('mcpServerStatus/list', {
                     'threadId': sid, 'serverName': 'codex_tui', 'detail': 'toolsAndAuthOnly'}):
+                if server['name'] != 'codex_tui':
+                    raise RuntimeError('Codex daemon ignored the local-only MCP filter; update the daemon')
                 if server['name'] == 'codex_tui' and server.get('httpOrigin'):
                     status = server.get('runtimeStatus') if saved else 'unrestorable'
                     roots.append((server['httpOrigin'], status, session))

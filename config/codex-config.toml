@@ -1,5 +1,5 @@
-model = "gpt-5.6-terra"
-model_reasoning_effort = "low"
+model = "gpt-6-astra"
+model_reasoning_effort = "medium"
 approvals_reviewer = "user"
 sandbox_mode = "danger-full-access"
 approval_policy = "never"
@@ -71,6 +71,7 @@ trust_level = "trusted"
 session_picker_view = "comfortable"
 status_line = ["model-with-reasoning", "current-dir", "project-name", "git-branch", "permissions", "approval-mode"]
 status_line_use_colors = true
+screen_reader_detection_done = true
 
 [tui.model_availability_nux]
 "gpt-5.5" = 4

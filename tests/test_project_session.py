@@ -238,18 +238,19 @@ focus_tab 0
             with self.assertRaisesRegex(RuntimeError, "i3 rejected"):
                 ps.i3("move")
 
-    def test_restored_codex_uses_neovim_despite_display_manager_environment(self):
+    def test_restored_codex_uses_configured_defaults_despite_display_manager_environment(self):
         args = SimpleNamespace(cwd=self.tmp.name, codex_home=None,
                                session='saved-conversation', dashboard=False)
         observed = {}
         def launch(argv, **kwargs):
-            observed.update(argv=argv, editor=os.environ.get('EDITOR'), visual=os.environ.get('VISUAL'))
-        with patch.dict(os.environ, {'EDITOR': 'nano', 'VISUAL': 'nano'}), \
+            observed.update(argv=argv, editor=os.environ.get('EDITOR'), visual=os.environ.get('VISUAL'), browser=os.environ.get('BROWSER'))
+        with patch.dict(os.environ, {'EDITOR': 'nano', 'VISUAL': 'nano', 'BROWSER': 'firefox'}), \
              patch.object(ps.os, 'chdir'), patch.object(ps.signal, 'signal'), \
              patch.object(ps.subprocess, 'run', side_effect=launch), patch.object(ps.os, 'execl'):
             ps.pane(args)
         self.assertEqual(observed['editor'], 'nvim')
         self.assertEqual(observed['visual'], 'nvim')
+        self.assertEqual(observed['browser'], 'brave')
         self.assertEqual(observed['argv'], ['codex', 'resume', args.session, '--cd', self.tmp.name])
 
     def test_direct_helper_serializes_with_project_switch_lock(self):

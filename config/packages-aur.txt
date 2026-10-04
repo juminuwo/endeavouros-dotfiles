@@ -15,3 +15,4 @@ slack-desktop
 soundwire
 sunshine-bin
 xmousepasteblock
+wheelwizard

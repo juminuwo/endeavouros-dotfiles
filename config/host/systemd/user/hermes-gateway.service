@@ -6,10 +6,10 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-ExecStart=/home/howis/.hermes/hermes-agent/venv/bin/python -m hermes_cli.main gateway run
+ExecStart="/home/howis/.hermes/hermes-agent/.hermes/bin/hermes" "gateway" "run"
 WorkingDirectory=/home/howis/.hermes
-Environment="PATH=/home/howis/.hermes/hermes-agent/venv/bin:/home/howis/.hermes/hermes-agent/node_modules/.bin:/home/howis/.hermes/node/bin:/home/howis/.hermes/node:/home/howis/.local/bin:/home/howis/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-Environment="VIRTUAL_ENV=/home/howis/.hermes/hermes-agent/venv"
+Environment="PATH=/home/howis/.hermes/hermes-agent/node_modules/.bin:/home/howis/.hermes/node/bin:/home/howis/.hermes/tools/node-26.7.0-linux-x64/bin:/home/howis/.hermes/tools/npm-12.0.2-linux-x64/bin:/home/howis/.local/bin:/home/howis/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
 Environment="HERMES_HOME=/home/howis/.hermes"
 Environment="HERMES_SUPERVISED_CHILD=1"
 Restart=always
@@ -20,7 +20,8 @@ RestartPreventExitStatus=78
 KillMode=mixed
 KillSignal=SIGTERM
 ExecReload=/bin/kill -USR1 $MAINPID
-ExecStopPost=-/home/howis/.hermes/hermes-agent/venv/bin/python -m gateway.cgroup_cleanup
+ExecStop=-"/home/howis/.hermes/hermes-agent/.hermes/bin/hermes" "--run-module" "gateway.systemd_stop_mark"
+ExecStopPost=-"/home/howis/.hermes/hermes-agent/.hermes/bin/hermes" "--run-module" "gateway.cgroup_cleanup"
 TimeoutStopSec=210
 StandardOutput=journal
 StandardError=journal

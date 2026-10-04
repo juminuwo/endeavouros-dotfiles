@@ -148,7 +148,23 @@ are captured and restored by the whole-desktop coordinator described above.
 
 Codex versions using the shared app-server daemon are identified through each
 terminal process's owned loopback socket and the daemon's `codex_tui` connection
-metadata. The saver checks persisted conversation identity and rechecks the live
+metadata. This requires daemon 0.160.0 or newer, separately from the CLI version:
+`codex app-server daemon version` reports both. Older pinned daemons ignore the
+server filter and trigger remote MCP authentication, so the saver rejects them
+before making that request. Update with
+`codex app-server daemon update --from-cli --yes` when active Codex work can be
+interrupted; updating the CLI alone does not update the pinned server.
+If launching the update through a temporary systemd service, set
+`RemainAfterExit=yes` before starting it: the restarted daemon inherits that
+service's cgroup. Otherwise systemd sends it a shutdown signal when the updater
+exits. Moving the daemon afterward cannot cancel its graceful shutdown.
+Keep that service running while it owns the daemon. After any restart, check
+that existing terminal clients reconnected before trusting a successful save;
+clients reporting a failed reconnect need relaunching with their saved IDs,
+after preserving any drafts.
+Discovery is restricted to the local terminal's existing connection, avoiding
+remote MCP status/authentication checks. Timeouts identify the RPC and thread.
+The saver checks persisted conversation identity and rechecks the live
 mapping before publishing. Subagents are excluded; ambiguous mappings fail and
 retain the previous snapshot. Unused startup threads left behind after resuming
 are excluded only when the server confirms they never received a user message;

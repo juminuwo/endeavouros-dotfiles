@@ -307,28 +307,38 @@ class DesktopTests(unittest.TestCase):
         self.assertIn('desktop-session-shutdown.service', events[1])
         self.assertEqual(events[2], 'restore')
 
-    def test_shutdown_timeout_releases_inhibitor_and_preserves_snapshot(self):
-        self.capture()
-        original = (self.state / 'current.json').read_bytes()
-        callbacks = []
-        fd = os.open('/dev/null', os.O_RDONLY)
-        manager = SimpleNamespace(Inhibit=lambda *args: SimpleNamespace(take=lambda: fd))
-        props = SimpleNamespace(Get=lambda *args: 5000000)
-        bus = SimpleNamespace(get_object=lambda *args: object(),
-                              add_signal_receiver=lambda callback, **kwargs: callbacks.append(callback))
-        fake_dbus = SimpleNamespace(SystemBus=lambda: bus, Interface=lambda obj, name: props if name.endswith('Properties') else manager)
-        modules = {'dbus': fake_dbus, 'dbus.mainloop': SimpleNamespace(),
-                   'dbus.mainloop.glib': SimpleNamespace(DBusGMainLoop=lambda **kwargs: None),
-                   'gi': SimpleNamespace(), 'gi.repository': SimpleNamespace(GLib=SimpleNamespace(
-                       MainLoop=lambda: SimpleNamespace(run=lambda: callbacks[0](True))))}
-        with patch.dict(sys.modules, modules), patch.object(ds.subprocess, 'run', side_effect=subprocess.TimeoutExpired('save', 4.5)) as save, \
-             contextlib.redirect_stdout(io.StringIO()):
-            ds.watch_shutdown()
-        self.assertEqual(save.call_args.kwargs['timeout'], 4.5)
-        with self.assertRaises(OSError):
-            os.fstat(fd)
-        self.assertEqual(original, (self.state / 'current.json').read_bytes())
-        self.assertEqual(ds.ps.read_json(self.state / 'shutdown.json')['desktop'], 'desktop-1')
+    def test_shutdown_capture_commits_or_preserves_snapshot_and_releases_inhibitor(self):
+        for times_out in (True, False):
+            with self.subTest(times_out=times_out):
+                (self.state / 'shutdown.json').unlink(missing_ok=True)
+                self.capture()
+                original = (self.state / 'current.json').read_bytes()
+                callbacks = []
+                fd = os.open('/dev/null', os.O_RDONLY)
+                manager = SimpleNamespace(Inhibit=lambda *args: SimpleNamespace(take=lambda: fd))
+                props = SimpleNamespace(Get=lambda *args: 5000000)
+                bus = SimpleNamespace(get_object=lambda *args: object(),
+                                      add_signal_receiver=lambda callback, **kwargs: callbacks.append(callback))
+                fake_dbus = SimpleNamespace(SystemBus=lambda: bus, Interface=lambda obj, name: props if name.endswith('Properties') else manager)
+                modules = {'dbus': fake_dbus, 'dbus.mainloop': SimpleNamespace(),
+                           'dbus.mainloop.glib': SimpleNamespace(DBusGMainLoop=lambda **kwargs: None),
+                           'gi': SimpleNamespace(), 'gi.repository': SimpleNamespace(GLib=SimpleNamespace(
+                               MainLoop=lambda: SimpleNamespace(run=lambda: callbacks[0](True))))}
+                def capture_or_timeout(*args, **kwargs):
+                    if times_out:
+                        raise subprocess.TimeoutExpired('save', 4.5)
+                    self.capture(shutdown=True)
+                with patch.dict(sys.modules, modules), patch.object(ds.subprocess, 'run', side_effect=capture_or_timeout) as save, \
+                     contextlib.redirect_stdout(io.StringIO()):
+                    ds.watch_shutdown()
+                self.assertEqual(save.call_args.kwargs['timeout'], 4.5)
+                with self.assertRaises(OSError):
+                    os.fstat(fd)
+                if times_out:
+                    self.assertEqual(original, (self.state / 'current.json').read_bytes())
+                else:
+                    self.assertNotEqual(original, (self.state / 'current.json').read_bytes())
+                self.assertEqual(ds.ps.read_json(self.state / 'shutdown.json')['desktop'], 'desktop-1')
 
 
 if __name__ == '__main__':
