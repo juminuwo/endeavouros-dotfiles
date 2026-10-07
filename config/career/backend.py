@@ -213,6 +213,19 @@ class Backend:
 
     def project(self, state):
         try:
+            for key, decision in state['jobs'].items():
+                if not decision.get('pack_path'):
+                    continue
+                index = self.safe_path(f'Applications/{key}/{key}.md')
+                versions = sorted(index.parent.glob('Application-v*.md'))
+                content = ('---\ntype: index\nstatus: active\n---\n\n# ' + key +
+                           '\n\nVersioned application drafts. Submission is recorded separately in [[Career Board]].\n\n' +
+                           '\n'.join(f'- [[Applications/{key}/{p.stem}]]' for p in versions) + '\n')
+                atomic_write(index, content)
+            if any(d.get('pack_path') for d in state['jobs'].values()):
+                index = self.safe_path('Applications/Applications.md')
+                if not index.exists():
+                    atomic_write(index, '---\ntype: index\nstatus: active\n---\n\n# Applications\n\nSee [[Career Board]] for roles, stages and versioned application drafts.\n')
             atomic_write(self.safe_path('Career Board.md'), self.board(state))
             return None
         except (OSError, Error) as exc:
@@ -221,6 +234,8 @@ class Backend:
     def list(self):
         inventory, state = self.inventory(), self.state()
         result = {'jobs': list(self.jobs(inventory, state).values()),
+                  'inventory_updated_at': inventory.get('updated_at'),
+                  'workspace_updated_at': state.get('updated_at'),
                   'updated_at': max(filter(None, [inventory.get('updated_at'), state.get('updated_at')]), default=None)}
         warning = self.board_warning(state)
         if warning:
@@ -336,7 +351,9 @@ class Backend:
                 try:
                     # Exclusive creation preserves every earlier version, including orphans.
                     with path.open('x', encoding='utf-8') as stream:
-                        stream.write(content)
+                        frontmatter = '' if content.startswith('---\n') else (
+                            '---\ntype: reference\nstatus: draft\ndate: ' + now()[:10] + '\n---\n\n')
+                        stream.write(frontmatter + content)
                         stream.flush()
                         os.fsync(stream.fileno())
                 except OSError as exc:

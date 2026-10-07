@@ -45,6 +45,13 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(caught.exception.payload['code'], code)
         return caught.exception.payload
 
+    def test_choice_does_not_make_inventory_look_fresh(self):
+        before = self.b.list()['inventory_updated_at']
+        self.b.mutate('job-a', 'shortlisted', 'unseen', 0)
+        after = self.b.list()
+        self.assertEqual(before, after['inventory_updated_at'])
+        self.assertIsNotNone(after['workspace_updated_at'])
+
     def test_readonly_and_sanitized(self):
         self.inventory['jobs']['job-a']['title'] = '\x1b[31mTitle\x1b[0m\x00\u202e'
         self.write_inventory()
@@ -102,11 +109,14 @@ class BackendTests(unittest.TestCase):
         self.assert_error('request_conflict', lambda: self.pack(content=CONTENT + '\nExtra content.'))
         second = self.pack('two', 'draft', 1, CONTENT + '\nSecond version.')
         self.assertEqual(second['pack_path'], 'Applications/job-a/Application-v002.md')
-        self.assertEqual((self.root / first['pack_path']).read_text(), CONTENT)
+        self.assertTrue((self.root / first['pack_path']).read_text().endswith(CONTENT))
+        self.assertTrue((self.root / first['pack_path']).read_text().startswith('---\ntype: reference\nstatus: draft'))
         self.assertEqual(first, self.pack())
         self.assert_error('conflict', lambda: self.pack('three', 'draft', 1))
         self.assert_error('draft_requires_pack', lambda: self.b.mutate('job-a', 'draft', 'draft', 1))
-        self.assertEqual(len(list((self.root / 'Applications/job-a').glob('*.md'))), 2)
+        self.assertEqual(len(list((self.root / 'Applications/job-a').glob('Application-v*.md'))), 2)
+        self.assertTrue((self.root / 'Applications/Applications.md').exists())
+        self.assertIn('Application-v002', (self.root / 'Applications/job-a/job-a.md').read_text())
 
     def test_bad_ids_and_symlinks(self):
         for key in ('../escape', 'job/a', '/tmp/a', '.', '', 'a\n', 'a\\b'):
@@ -144,11 +154,11 @@ class BackendTests(unittest.TestCase):
         with patch.object(self.b, 'commit', side_effect=OSError('disk failure')):
             error = self.assert_error('state_write_failed', self.pack)
         orphan = Path(error['orphan_path'])
-        self.assertEqual(orphan.read_text(), CONTENT)
+        self.assertTrue(orphan.read_text().endswith(CONTENT))
         self.assertEqual(self.job()['status'], 'unseen')
         retry = self.pack()
         self.assertTrue(retry['pack_path'].endswith('v002.md'))
-        self.assertEqual(orphan.read_text(), CONTENT)
+        self.assertTrue(orphan.read_text().endswith(CONTENT))
 
     def test_pack_write_failure_never_commits(self):
         original = Path.open

@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+career_source="$(readlink -f -- "${BASH_SOURCE[0]}")"
+career_config="$(dirname "$(dirname "$career_source")")/career"
+career_root="${CAREER_ROOT:-$HOME/Documents/online-personal/Personal/Career}"
+if ! command -v pi >/dev/null 2>&1; then
+  echo 'Pi is not installed or is not on PATH.' >&2
+  exit 1
+fi
+if [[ ! -d "$career_root" ]]; then
+  echo "Career vault folder not found: $career_root" >&2
+  exit 1
+fi
+export CAREER_ROOT="$career_root"
+cd "$career_root"
+exec pi --no-context-files --no-skills --extension "$career_config/index.ts" --append-system-prompt "$career_config/system.md" --name Career --career "$@"

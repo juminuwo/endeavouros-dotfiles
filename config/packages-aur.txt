@@ -10,6 +10,7 @@ koreader-bin
 leaf-markdown-viewer-bin
 localsend-bin
 nordvpn-bin
+pi-coding-agent-bin
 railwayapp-cli
 slack-desktop
 soundwire

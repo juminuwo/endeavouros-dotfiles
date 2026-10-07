@@ -1,0 +1,4 @@
+interface:
+  display_name: "Career Search"
+  short_description: "Continue an Obsidian-based job search and interview practice"
+  default_prompt: "Use $career-search to continue my job search from its saved Obsidian state."
