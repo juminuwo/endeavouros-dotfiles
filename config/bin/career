@@ -13,4 +13,4 @@ if [[ ! -d "$career_root" ]]; then
 fi
 export CAREER_ROOT="$career_root"
 cd "$career_root"
-exec pi --no-context-files --no-skills --extension "$career_config/index.ts" --append-system-prompt "$career_config/system.md" --name Career --career "$@"
+exec pi --provider openai --model gpt-6-luna --no-context-files --no-skills --extension "$career_config/index.ts" --append-system-prompt "$career_config/system.md" --name Career --career "$@"

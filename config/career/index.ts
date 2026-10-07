@@ -7,7 +7,8 @@ import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { CareerScreen, FilterProgress } from './ui.ts';
-import { assessFilter, clearFilter, restoreSessionView } from './prompt-filter.mjs';
+import { clearFilter, restoreSessionView } from './prompt-filter.mjs';
+import { fastFilter, diskCache } from './fast-filter.mjs';
 import { clean, capability, safeUrl, saveAndReload, repairAndReload } from './model.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -73,6 +74,7 @@ export default function career(pi: ExtensionAPI) {
     if (opening) return;
     if (!ctx.isIdle()) {ctx.ui.notify('Stop the current response with Escape, then reopen Career.','warning');return;}
     opening=true;
+    ctx.ui.setWidget('career',undefined);
     try {
       const outcome:any=await ctx.ui.custom((tui:any,theme:any,_kb:any,done:any)=>{
         const screen=new CareerScreen(tui,theme,state,done,async(action:string,job:any,view:CareerScreen)=>{
@@ -97,7 +99,7 @@ export default function career(pi: ExtensionAPI) {
                 ()=>backend(['list']));
               if(outcome.data) view.setData(outcome.data);
               else {view.jobs=view.jobs.map(row=>row.id===job.id?outcome.saved.job:row);view.normalise();}
-              view.notice=`${job.company}: ${target==='unseen'?'restored to Discover':target}. Saved to your vault.`;
+              view.notice=target==='shortlisted' ? `${job.company}: saved to Shortlist — press 2 to find it.` : `${job.company}: ${target==='unseen'?'restored to Discover':target}. Saved to your vault.`;
               if(outcome.refreshError) view.notice+=` Reload failed: ${outcome.refreshError}`;
               else if(outcome.saved.warning) view.notice+=' '+outcome.saved.warning;
               view.error=Boolean(outcome.refreshError || outcome.saved.warning);
@@ -159,7 +161,7 @@ export default function career(pi: ExtensionAPI) {
         const denied=capability(selected,target); if(denied) throw new Error(denied);
         if(kind!=='applied' || await ctx.ui.confirm('Mark applied?', 'Confirm you have submitted this application. This records today’s date; it does not send anything.')) {
           const saved=await backend(['status',selected.id,target,'--expected',selected.status,'--expected-revision',String(selected.revision)]);
-          ctx.ui.notify(saved.warning || `Saved: ${target}.`,saved.warning?'warning':'info');
+          ctx.ui.notify(saved.warning || (target==='shortlisted' ? 'Saved to Shortlist — press 2 to find it.' : `Saved: ${target}.`),saved.warning?'warning':'info');
         }
       }
       opening=false; await board(ctx);
@@ -171,10 +173,10 @@ export default function career(pi: ExtensionAPI) {
     const epoch=++filterEpoch;
     const previous=state.semantic;
     const choices=previous?.prompt
-      ? ['Edit prompt and apply','Reapply last prompt to current roles','Clear agent filter','Back to roles']
-      : ['Describe the roles you want','Back to roles'];
+      ? ['Edit prompt and apply','Reapply last prompt to current roles','Search thoroughly','Clear agent filter','Back to roles']
+      : ['Describe the roles you want','Search thoroughly','Back to roles'];
     const choice=await ctx.ui.select('Agent filter · broad matches welcome',choices);
-    if(!choice || choice==='Back to roles') return;
+    if(epoch!==filterEpoch || !choice || choice==='Back to roles') return;
     if(choice==='Clear agent filter') {
       state.semantic=clearFilter(previous);state.index=0;state.id=undefined;
       pi.appendEntry('career-view',state);
@@ -182,9 +184,9 @@ export default function career(pi: ExtensionAPI) {
       return;
     }
     let prompt=previous?.prompt || '';
-    if(choice!=='Reapply last prompt to current roles') {
+    if(choice!=='Reapply last prompt to current roles' && (choice!=='Search thoroughly' || !prompt)) {
       const edited=await ctx.ui.editor('What roles interest you? Include tangential matches if useful.',prompt || '');
-      if(edited===undefined) return;
+      if(epoch!==filterEpoch || edited===undefined) return;
       prompt=edited.trim();
     }
     if(!prompt || prompt.length>4000) {ctx.ui.notify('Enter a prompt of 1–4000 characters, or use Clear agent filter.','warning');return;}
@@ -195,9 +197,12 @@ export default function career(pi: ExtensionAPI) {
       const progress=new FilterProgress(tui,theme,prompt,()=>{controller.abort();finish({cancelled:true});});
       void (async()=>{
         const snapshot=await backend(['filter-candidates'],undefined,controller.signal);
-        return await assessFilter(snapshot,prompt,(context:any,signal:any)=>ctx.modelRegistry.complete(ctx.model,context,{
+        return await fastFilter(snapshot,prompt,(context:any,signal:any)=>ctx.modelRegistry.complete(ctx.model,context,{
           signal:AbortSignal.any([signal,AbortSignal.timeout(120000)]),maxTokens:12000,
-        }),controller.signal,(value:any)=>{if(!finished)progress.update(value);});
+        }),controller.signal,(value:any)=>{if(!finished)progress.update(value);},{
+          cache:diskCache(join(root,'data','agent-filter-cache')),
+          model:`${ctx.model.provider}/${ctx.model.id}`,thorough:choice==='Search thoroughly',
+        });
       })().then(filter=>finish({filter})).catch(error=>finish({error:clean(error.message)}));
       return progress;
     });
@@ -205,7 +210,7 @@ export default function career(pi: ExtensionAPI) {
     if(outcome.filter) {
       state.semantic=outcome.filter;state.index=0;state.id=undefined;
       pi.appendEntry('career-view',state);
-      ctx.ui.notify(`Agent filter applied: ${Object.keys(outcome.filter.matches).length} matches across ${Object.keys(outcome.filter.assessed).length} roles. Estimated model cost $${outcome.filter.cost.toFixed(3)}.`, 'info');
+      ctx.ui.notify(`Agent filter applied: ${Object.keys(outcome.filter.matches).length} matches across ${Object.keys(outcome.filter.assessed).length} roles.`, 'info');
     } else ctx.ui.notify(outcome.cancelled?'Cancelled. Your previous filter is unchanged.':`Filter failed; previous results kept. ${outcome.error}`,outcome.cancelled?'info':'error');
   }
 

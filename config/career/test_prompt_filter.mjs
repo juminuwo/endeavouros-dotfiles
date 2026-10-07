@@ -16,7 +16,6 @@ test('semantic matches include tangential roles, compose with board filters, and
  assert.deepEqual(jobs,before);
  const moved=[{...jobs[0],status:'shortlisted'},...jobs.slice(1)];
  assert.equal(filtered(moved,'Shortlist','','All roles',filter)[0].id,'a');
- assert.equal(filter.cost,0.01);
 });
 test('unknown, missing, duplicate IDs and malformed results cannot publish',()=>{
  for(const bad of [rows.slice(1),[rows[0],rows[0],rows[2]],[{...rows[0],id:'x'},...rows.slice(1)],[{...rows[0],level:'perfect'},...rows.slice(1)]]) {

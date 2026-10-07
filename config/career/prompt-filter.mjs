@@ -49,22 +49,22 @@ export async function assessFilter(snapshot,prompt,complete,signal,onProgress=()
   if (!prompt.trim() || prompt.length>4000) throw new Error('Use a search prompt between 1 and 4000 characters.');
   const jobs=snapshot.jobs;
   if (new Set(jobs.map(j=>j.id)).size!==jobs.length) throw new Error('Duplicate roles in inventory snapshot.');
-  const matches={}, assessed={};let count=0,cost=0;
+  const matches={}, assessed={};let count=0;
   const abort=()=>{if(signal?.aborted) throw new Error('Filter cancelled.');};
   for (const batch of batches(jobs)) {
-    abort();onProgress({count,total:jobs.length,cost});
+    abort();onProgress({count,total:jobs.length});
     const response=await complete({systemPrompt:filterSystem,messages:[{role:'user',content:[{type:'text',text:JSON.stringify({prompt,jobs:batch})}],timestamp:Date.now()}]},signal);
     abort();
     if (response.stopReason!=='stop') throw new Error(`Agent filter did not finish (${response.stopReason || 'unknown'}). ${response.errorMessage || ''}`);
     const text=response.content.filter(c=>c.type==='text').map(c=>c.text).join('\n');
     for (const row of parseBatch(text,batch)) if(row.level!=='none') matches[row.id]={level:row.level,reason:row.reason};
     for (const job of batch) assessed[job.id]=job.evidence_hash || '';
-    count+=batch.length;cost+=response.usage?.cost?.total || 0;
-    onProgress({count,total:jobs.length,cost});
+    count+=batch.length;
+    onProgress({count,total:jobs.length});
   }
   abort();
   return {active:true,prompt:clean(prompt),matches,assessed,inventory_updated_at:snapshot.inventory_updated_at,
-    completed_at:new Date().toISOString(),cost};
+    completed_at:new Date().toISOString()};
 }
 
 export function restoreSessionView(entries) {

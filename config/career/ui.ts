@@ -124,9 +124,18 @@ export class CareerScreen {
     const height = Math.max(12, Math.min(45, (this.tui.terminal?.rows || process.stdout.rows || 32) - 5));
     const out:string[] = [];
     const line = (s='') => out.push(truncateToWidth(s,w));
-    line(th.fg('accent', th.bold(' Career ')) + th.fg('muted', 'Your next role, one good decision at a time'));
-    line(tabs.map((t,i) => i === this.state.tab ? th.fg('accent',th.bold(` ${i+1} ${t} `)) : th.fg('muted',` ${i+1} ${t} `)).join('  '));
-    line(th.fg('borderMuted','─'.repeat(w)));
+    line(th.fg('text', th.bold(' Career')) + th.fg('muted', '  /  Your job search'));
+    const tabNames = w >= 65 ? tabs : ['Discover','Saved','Apps','Dismissed'];
+    const labels = tabNames.map((name,i)=>` ${i+1} ${name} `);
+    const active = (text:string) => th.fg('accent',`\x1b[7m${th.bold(text)}\x1b[27m`);
+    for(const row of [0,1,2]) {
+      line(labels.map((label,i)=>{
+        if(i===this.state.tab) return active(row===1 ? ` ${label} ` : ' '.repeat(label.length+2));
+        if(row===0) return th.fg('border','╭'+'─'.repeat(label.length)+'╮');
+        if(row===2) return th.fg('border','╰'+'─'.repeat(label.length)+'╯');
+        return th.fg('border','│')+th.fg('text',label)+th.fg('border','│');
+      }).join(' '));
+    }
     if (this.filtering) {
       for (const l of this.filter.render(Math.max(1,w-10))) line(' Filter: '+l);
     } else line(th.fg('muted',` / Filter: ${this.state.query || 'all companies and locations'}    f: ${this.state.lane}`));
@@ -140,7 +149,7 @@ export class CareerScreen {
         ' Find work without remembering prompts or file names.', '',
         ' ↑/↓ or j/k  Browse roles        1–4 / Tab  Change section',
         ' /  Search title/company/place  f  Cycle role family',
-        ' g  Agent filter: describe, edit, reapply or clear',
+        ' g  Agent filter: edit, reapply, thorough search, clear',
         ' Includes direct, related, tangential and uncertain matches.',
         ' Enter  Show all actions        v  Expand details (↑/↓ scroll)',
         ' a  Discuss fit / ask anything  p  Prepare application draft',
@@ -191,7 +200,7 @@ export class CareerScreen {
 
 
 export class FilterProgress {
-  count=0; total=0; cost=0;
+  count=0; total=0; phase='Loading roles';
   constructor(public tui:any,public theme:any,public prompt:string,public cancel:()=>void) {}
   invalidate() {}
   dispose() {this.cancel();}
@@ -202,10 +211,10 @@ export class FilterProgress {
   render(width:number) {
     const lines=[this.theme.fg('accent',this.theme.bold(' Agent filter')), '',
       ...wrapTextWithAnsi(clean(this.prompt),Math.max(8,width)), '',
-      `${this.count} / ${this.total || '…'} roles assessed. Includes tangential and uncertain matches.`,
+      this.phase,
+      `${this.count} / ${this.total} roles. Includes tangential and uncertain matches.`,
       'Matching cached listing evidence, not checking live vacancies.',
       'Previous results stay in place until this run completes.',
-      this.cost ? `Estimated model cost so far: $${this.cost.toFixed(3)}` : '',
       '',this.theme.fg('muted','Escape cancels and keeps your previous filter.')];
     return lines.map(line=>truncateToWidth(line,width));
   }
