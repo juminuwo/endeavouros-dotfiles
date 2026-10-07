@@ -1,3 +1,4 @@
+import {constraintNotice} from './result-constraints.mjs';
 import { Input, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from '@earendil-works/pi-tui';
 import { tabs, filtered, clean, capability } from './model.mjs';
 import { unassessedCount } from './prompt-filter.mjs';
@@ -140,6 +141,7 @@ export class CareerScreen {
       for (const l of this.filter.render(Math.max(1,w-10))) line(' Filter: '+l);
     } else line(th.fg('muted',` / Filter: ${this.state.query || 'all companies and locations'}    f: ${this.state.lane}`));
     const semantic=this.state.semantic;
+    if(semantic?.active && constraintNotice(semantic))line(th.fg('warning',` ${constraintNotice(semantic)}`));
     const pending=unassessedCount(this.jobs,semantic);
     const label=semantic?.active ? `${pending ? `${pending} new/changed — reapply · ` : ''}${semantic.prompt}` : semantic?.prompt ? `off (last: ${semantic.prompt})` : 'off';
     line(th.fg(semantic?.active?'accent':'muted',` g Agent filter: ${label}`));

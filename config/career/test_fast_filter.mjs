@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import {mkdtemp, readdir, writeFile, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {fastFilter,diskCache,listingEvidence,parseSelection} from './fast-filter.mjs';
+import {fastFilter as runFilter,diskCache,listingEvidence,parseSelection} from './fast-filter.mjs';
+const unconstrained={min:null,max:null,uniqueCompanies:false,random:false};
+const fastFilter=(snapshot,prompt,complete,...args)=>runFilter(snapshot,prompt,(ctx,signal)=>ctx.systemPrompt.startsWith('Parse only')?Promise.resolve(response(unconstrained)):complete(ctx,signal),...args);
 const jobs=['a','b','c'].map(id=>({id,title:id,company:'Example',summary:'Existing summary '+id,matches:['Existing fit note'],description:'Evidence '+id,evidence_hash:'v1',status:'unseen',lifecycle:'active'}));
 const snapshot={jobs};
 const response=data=>({stopReason:'stop',content:[{type:'text',text:JSON.stringify(data)}]});
@@ -116,7 +118,7 @@ test('old summary-based cache namespace is never read',async()=>{
  await fastFilter(snapshot,'x',complete,undefined,undefined,{cache:{
   get:async key=>{keys.push(key);return null;},set:async key=>keys.push(key),
  }});
- assert.ok(keys.length>0);assert.ok(keys.every(key=>key[0]==='career-filter-v3'));
+ assert.ok(keys.length>0);assert.ok(keys.every(key=>key[0]==='career-filter-v4'));
  assert.deepEqual(calls,[['select',['a','b','c']],['detail',['a','b']]]);
 });
 test('whitespace-only evidence cannot be excluded by the first pass',async()=>{
