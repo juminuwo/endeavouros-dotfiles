@@ -92,3 +92,34 @@ test('multiline prompts and restored normalized prompts share cached results',as
  await fastFilter(snapshot,saved.prompt,complete,undefined,undefined,{cache});
  assert.equal(calls.length,0);
 });
+test('overlong summary is corrected once with a specific reason and cached only after validation',async()=>{
+ const {cache,complete,calls}=setup();let attempts=0;
+ const result=await fastFilter(snapshot,'x',async context=>{
+  if(context.systemPrompt.startsWith('Summarise')) {
+   attempts++;
+   if(attempts===1)return response({summaries:jobs.map(j=>({id:j.id,summary:'x'.repeat(901)}))});
+   assert.match(JSON.parse(context.messages[0].content[0].text).correction,/901 characters; maximum is 900/);
+  }
+  return complete(context);
+ },undefined,undefined,{cache});
+ assert.equal(attempts,2);assert.ok(result.matches.a);
+ calls.length=0;await fastFilter(snapshot,'x',complete,undefined,undefined,{cache});assert.equal(calls.length,0);
+});
+test('summary retry is bounded and reports exact failure without retrying transport errors',async()=>{
+ let calls=0;
+ await assert.rejects(()=>fastFilter(snapshot,'x',async()=>{
+  calls++;return response({summaries:jobs.map(j=>({id:j.id,summary:'x'.repeat(950)}))});
+ }),/after one retry: Summary for role a was 950 characters/);
+ assert.equal(calls,2);calls=0;
+ await assert.rejects(()=>fastFilter(snapshot,'x',async()=>{calls++;throw new Error('network failed');}),/network failed/);
+ assert.equal(calls,1);
+});
+test('cancelling during summary repair does not cache or publish the repaired response',async()=>{
+ const controller=new AbortController();let calls=0,writes=0;
+ await assert.rejects(()=>fastFilter(snapshot,'x',async()=>{
+  calls++;
+  if(calls===1)return response({summaries:[]});
+  controller.abort();return response({summaries:jobs.map(j=>({id:j.id,summary:'Valid evidence.'}))});
+ },controller.signal,undefined,{cache:{get:async()=>null,set:async()=>writes++}}),/cancelled/);
+ assert.equal(calls,2);assert.equal(writes,0);
+});
