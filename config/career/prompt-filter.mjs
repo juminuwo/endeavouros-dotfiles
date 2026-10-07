@@ -1,4 +1,5 @@
 import {clean} from './model.mjs';
+import {FilterOutputError,parseJSON,validatedResponse} from './filter-response.mjs';
 export const relevance = {direct:0, related:1, tangential:2, uncertain:3, none:4};
 export const eligible = job => job.lifecycle === 'active' || !['unseen','reviewed'].includes(job.status);
 export function restoreFilter(value) {
@@ -17,18 +18,20 @@ export function unassessedCount(jobs,filter) {
   return jobs.filter(j=>eligible(j) && (!Object.hasOwn(filter.assessed,j.id) || filter.assessed[j.id] !== (j.evidence_hash || ''))).length;
 }
 export function parseBatch(text, jobs) {
-  const raw=text.trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'');
-  const result=JSON.parse(raw);
+  const result=parseJSON(text);
   const ids=new Set(jobs.map(j=>j.id));
-  if (!Array.isArray(result.results) || result.results.length!==ids.size) throw new Error('Agent response did not assess every role in this batch.');
+  if (!Array.isArray(result?.results)) throw new FilterOutputError('Assessment must contain a results array.');
   const seen=new Set();
   for (const row of result.results) {
-    if (!row || !ids.has(row.id) || seen.has(row.id) || !Object.hasOwn(relevance,row.level) ||
-        typeof row.reason!=='string' || (row.level!=='none' && !row.reason.trim()) || row.reason.length>600) {
-      throw new Error('Agent response contained an unknown/duplicate role or invalid explanation.');
-    }
+    if (!row || typeof row.id!=='string') throw new FilterOutputError('Assessment rows must contain string IDs.');
+    if (!ids.has(row.id)) throw new FilterOutputError(`Assessment contains an unknown ID: ${JSON.stringify(row.id).slice(0,200)}.`);
+    if (seen.has(row.id)) throw new FilterOutputError(`Assessment contains a duplicate ID: ${JSON.stringify(row.id).slice(0,200)}.`);
+    if (!Object.hasOwn(relevance,row.level)) throw new FilterOutputError(`Assessment has an invalid relevance level for ${row.id}.`);
+    if (typeof row.reason!=='string' || (row.level!=='none' && !row.reason.trim()) || row.reason.length>600)
+      throw new FilterOutputError(`Assessment has an invalid explanation for ${row.id}; use a short string (1–600 characters for matches).`);
     seen.add(row.id);
   }
+  if(seen.size!==ids.size)throw new FilterOutputError(`Assessment is missing ${ids.size-seen.size} role(s); assess every supplied ID exactly once.`);
   return result.results.map(row=>({id:row.id,level:row.level,reason:clean(row.reason)}));
 }
 export function batches(jobs) {
@@ -53,11 +56,8 @@ export async function assessFilter(snapshot,prompt,complete,signal,onProgress=()
   const abort=()=>{if(signal?.aborted) throw new Error('Filter cancelled.');};
   for (const batch of batches(jobs)) {
     abort();onProgress({count,total:jobs.length});
-    const response=await complete({systemPrompt:filterSystem,messages:[{role:'user',content:[{type:'text',text:JSON.stringify({prompt,jobs:batch})}],timestamp:Date.now()}]},signal);
-    abort();
-    if (response.stopReason!=='stop') throw new Error(`Agent filter did not finish (${response.stopReason || 'unknown'}). ${response.errorMessage || ''}`);
-    const text=response.content.filter(c=>c.type==='text').map(c=>c.text).join('\n');
-    for (const row of parseBatch(text,batch)) if(row.level!=='none') matches[row.id]={level:row.level,reason:row.reason};
+    const rows=await validatedResponse(filterSystem,{prompt,jobs:batch},text=>parseBatch(text,batch),complete,signal,'Full assessment');
+    for (const row of rows) if(row.level!=='none') matches[row.id]={level:row.level,reason:row.reason};
     for (const job of batch) assessed[job.id]=job.evidence_hash || '';
     count+=batch.length;
     onProgress({count,total:jobs.length});

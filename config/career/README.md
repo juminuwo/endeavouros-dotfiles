@@ -25,7 +25,9 @@ The filter intersects the current destination, text filter and role family. **g*
 
 **Search thoroughly** skips listing selection and checks every eligible role against the fuller cached evidence. It can find details omitted from summaries; it still does not verify live vacancies. Valid full-description assessments can be reused in either mode, but quick-search exclusions never count as thorough checks. Repeating the same prompt and inventory restores cached results without model calls. Cache keys include model, mode, prompt and actual evidence; a changed or expired description invalidates relevant work.
 
-Filter state is saved with the Pi session. `career --continue` restores it; a fresh `career` session starts unfiltered. Matching uses the selected Career model; ordinary browsing remains local. Results publish only when every batch is complete and validated.
+Filter state is appended to the Pi session and can be restored by `career --continue` once Pi has persisted that session. A brand-new session with no normal assistant message may not flush to disk, so its filter view may be lost on restart. A fresh `career` session starts unfiltered. Shortlist and application decisions are saved independently in the vault and are unaffected by this limitation. Matching uses the selected Career model; ordinary browsing remains local. Results publish only when every batch is complete and validated.
+
+Completed model output is validated before use. Repeated exact candidate IDs are deduplicated; unknown IDs are never guessed or normalized. Invalid JSON, schemas, unknown IDs or malformed full assessments get at most one corrective request per selection/batch, using the same evidence. A second invalid response reports its specific validation failure and keeps the previous filter. Transport errors, cancellation and incomplete model responses do not trigger corrective requests. Quick search never silently falls back to checking the whole inventory.
 
 ## Storage and boundaries
 

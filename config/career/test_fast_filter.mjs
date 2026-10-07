@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtemp, readdir, writeFile, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {fastFilter,diskCache,listingEvidence} from './fast-filter.mjs';
+import {fastFilter,diskCache,listingEvidence,parseSelection} from './fast-filter.mjs';
 const jobs=['a','b','c'].map(id=>({id,title:id,company:'Example',summary:'Existing summary '+id,matches:['Existing fit note'],description:'Evidence '+id,evidence_hash:'v1',status:'unseen',lifecycle:'active'}));
 const snapshot={jobs};
 const response=data=>({stopReason:'stop',content:[{type:'text',text:JSON.stringify(data)}]});
@@ -47,7 +47,7 @@ test('thorough bypasses selection and checks quick exclusions; cached negatives 
  calls.length=0;await fastFilter(snapshot,'forecasting',complete,undefined,undefined,{...options,thorough:true});assert.equal(calls.length,0);
 });
 test('invalid candidate lists fail without publishing a result',async()=>{
- for(const candidates of [['unknown'],['a','a'],null]) {
+ for(const candidates of [['unknown'],null]) {
   const {complete}=setup();
   await assert.rejects(()=>fastFilter(snapshot,'x',async context=>context.systemPrompt.startsWith('Select')?response({candidates}):complete(context)),/selection/i);
  }
@@ -109,7 +109,7 @@ test('roles with missing listing evidence reach description checks even if selec
  assert.ok(result.matches.c);
 });
 test('null candidate response is rejected with an actionable error',async()=>{
- await assert.rejects(()=>fastFilter(snapshot,'x',async()=>response(null)),/Invalid candidate selection/);
+ await assert.rejects(()=>fastFilter(snapshot,'x',async()=>response(null)),/Candidate selection invalid after one corrective retry:.*candidates array/);
 });
 test('old summary-based cache namespace is never read',async()=>{
  const {complete,calls}=setup();const keys=[];
@@ -123,4 +123,46 @@ test('whitespace-only evidence cannot be excluded by the first pass',async()=>{
  const {complete,calls}=setup();
  await fastFilter({jobs:[{...jobs[2],summary:'  ',matches:['\n',' ']}]},'x',complete);
  assert.deepEqual(calls,[['select',['c']],['detail',['c']]]);
+});
+
+test('duplicate exact candidate IDs are safely deduplicated without retry or extra assessment',async()=>{
+ const {complete,calls}=setup();let selections=0;
+ const result=await fastFilter(snapshot,'x',async context=>{
+  if(context.systemPrompt.startsWith('Select')) {selections++;return response({candidates:['a','a','b','a']});}
+  return complete(context);
+ });
+ assert.equal(selections,1);assert.deepEqual(calls,[['detail',['a','b']]]);
+ assert.deepEqual(Object.keys(result.matches),['a','b']);
+});
+test('selection errors distinguish JSON, schema, ID types and unknown IDs without guessing',()=>{
+ for(const [text,error] of [['bad',/valid JSON/],['null',/candidates array/],['{}',/candidates array/],['{"candidates":[3]}',/strings/],['{"candidates":[" a"]}',/unknown ID/]])assert.throws(()=>parseSelection(text,jobs),error);
+ assert.deepEqual([...parseSelection('{"candidates":[]}',jobs)],[]);
+});
+test('malformed selection corrects once with original inventory; persistent failures never fall back',async()=>{
+ for(const bad of [null,{}, {candidates:['unknown']},{candidates:[7]},'broken']) {
+  const {complete,calls,cache}=setup();let attempts=0;
+  const filter=await fastFilter(snapshot,'x',async context=>{
+   if(!context.systemPrompt.startsWith('Select'))return complete(context);
+   attempts++;assert.deepEqual(JSON.parse(context.messages[0].content[0].text).jobs,jobs.map(listingEvidence).map(j=>JSON.parse(JSON.stringify(j))));
+   if(attempts===1)return bad==='broken'?{stopReason:'stop',content:[{type:'text',text:'{bad'}]}:response(bad);
+   assert.match(context.messages[1].content[0].text,/previous response was invalid/);
+   return response({candidates:['a']});
+  },undefined,undefined,{cache});
+  assert.equal(attempts,2);assert.deepEqual(calls,[['detail',['a']]]);assert.deepEqual(Object.keys(filter.matches),['a']);
+ }
+ let calls=0,writes=0;
+ await assert.rejects(()=>fastFilter(snapshot,'x',async()=>{calls++;return response({candidates:['unknown']});},undefined,undefined,{cache:{get:async()=>null,set:async()=>writes++}}),/after one corrective retry:.*unknown ID/);
+ assert.equal(calls,2);assert.equal(writes,0);
+});
+test('selection transport, cancellation and non-stop outcomes never retry',async()=>{
+ for(const kind of ['transport','cancel','length','error','aborted','toolUse']) {
+  const controller=new AbortController();let calls=0;
+  await assert.rejects(()=>fastFilter(snapshot,'x',async()=>{
+   calls++;
+   if(kind==='transport')throw new Error('network failed');
+   if(kind==='cancel'){controller.abort();return response(null);}
+   return {stopReason:kind,content:[{type:'text',text:'malformed'}]};
+  },controller.signal),kind==='transport'?/network/:kind==='cancel'?/cancelled/:/did not finish/);
+  assert.equal(calls,1);
+ }
 });

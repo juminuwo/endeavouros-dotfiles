@@ -65,3 +65,56 @@ test('new and resumed sessions cannot inherit another session filter',async()=>{
  assert.equal(b.semantic.active,false);assert.equal(b.semantic.prompt,'forecasting');
  assert.equal(a.semantic.active,true);
 });
+
+test('malformed assessment retries only its batch once and requires exact complete replacement',async()=>{
+ for(const bad of [null,{}, {results:rows.slice(1)}, {results:[rows[0],rows[0],rows[2]]}, {results:[{...rows[0],id:'unknown'},...rows.slice(1)]}, {results:[{...rows[0],reason:''},...rows.slice(1)]}, 'broken']) {
+  let calls=0;
+  const filter=await assessFilter(snapshot,'forecasting',async context=>{
+   calls++;
+   if(calls===1)return {stopReason:'stop',content:[{type:'text',text:bad==='broken'?'broken':JSON.stringify(bad)}]};
+   assert.match(context.messages[1].content[0].text,/complete replacement JSON/);
+   assert.deepEqual(JSON.parse(context.messages[0].content[0].text).jobs,jobs);
+   return response(rows);
+  });
+  assert.equal(calls,2);assert.deepEqual(Object.keys(filter.matches),['a','b']);
+ }
+ let calls=0;
+ await assert.rejects(()=>assessFilter(snapshot,'x',async()=>{calls++;return response([]);}),/Full assessment invalid after one corrective retry:.*missing 3/);
+ assert.equal(calls,2);
+});
+test('assessment transport, cancellation and incomplete responses never retry',async()=>{
+ for(const kind of ['transport','cancel','length','error','aborted','toolUse']) {
+  let calls=0;const controller=new AbortController();
+  await assert.rejects(()=>assessFilter(snapshot,'x',async()=>{
+   calls++;if(kind==='transport')throw new Error('network failed');
+   if(kind==='cancel'){controller.abort();return response([]);}
+   return {stopReason:kind,content:[{type:'text',text:'bad'}]};
+  },controller.signal),kind==='transport'?/network/:kind==='cancel'?/cancelled/:/did not finish/);
+  assert.equal(calls,1);
+ }
+});
+test('late corrective completion after cancellation cannot publish results',async()=>{
+ let calls=0;const controller=new AbortController();
+ await assert.rejects(()=>assessFilter(snapshot,'x',async()=>{
+  calls++;if(calls===1)return response([]);
+  controller.abort();return response(rows);
+ },controller.signal),/cancelled/);
+ assert.equal(calls,2);
+});
+
+test('live Luna regression: concatenated JSON with stray characters requires one complete replacement',async()=>{
+ // Sanitized structure of the real 314-listing live run's malformed assessment:
+ // a complete results object, stray quote/braces, then another results object.
+ const valid=JSON.stringify({results:rows});
+ const malformed=valid+'"}"}'+valid;
+ assert.throws(()=>parseBatch(malformed,jobs),/not valid JSON/);
+ let calls=0;
+ const filter=await assessFilter(snapshot,'forecasting',async context=>{
+  calls++;
+  if(calls===1)return {stopReason:'stop',content:[{type:'text',text:malformed}]};
+  assert.match(context.messages[1].content[0].text,/not valid JSON/);
+  return response(rows);
+ });
+ assert.equal(calls,2);assert.deepEqual(Object.keys(filter.matches),['a','b']);
+ assert.deepEqual(Object.keys(filter.assessed),['a','b','c']);
+});
