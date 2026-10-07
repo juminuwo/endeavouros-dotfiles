@@ -1,5 +1,6 @@
 import { Input, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from '@earendil-works/pi-tui';
 import { tabs, filtered, clean, capability } from './model.mjs';
+import { unassessedCount } from './prompt-filter.mjs';
 
 export class CareerScreen {
   focused = true;
@@ -26,10 +27,10 @@ export class CareerScreen {
     this.updated = clean(data.inventory_updated_at ?? data.updated_at);
     this.busy = false;
     this.error = false;
-    this.notice = data.warning || 'Senior DS first. Browse with ↓ / ↑, then Enter for actions.';
+    this.notice = data.warning || (this.state.semantic?.active ? 'Prompt matches first. g changes or clears the agent filter.' : 'Senior DS first. Browse with ↓ / ↑, then Enter for actions.');
     this.normalise(); this.redraw();
   }
-  items() { return filtered(this.jobs, tabs[this.state.tab], this.state.query, this.state.lane); }
+  items() { return filtered(this.jobs, tabs[this.state.tab], this.state.query, this.state.lane, this.state.semantic); }
   normalise() {
     const list = this.items();
     const found = list.findIndex(j => j.id === this.state.id);
@@ -65,6 +66,7 @@ export class CareerScreen {
     }
     if (data === '?') { this.help = true; this.redraw(); return; }
     if (this.busy) return;
+    if (data === 'g') { void this.run('agent-filter'); return; }
     if (data === '/') { this.filtering = true; this.filter.focused = true; this.redraw(); return; }
     if (data === 'q') { this.done({kind:'close'}); return; }
     if (data === 'v') { this.detail = !this.detail; this.scroll = 0; this.redraw(); return; }
@@ -95,7 +97,7 @@ export class CareerScreen {
   }
   detailLines(job: any, width: number) {
     const th = this.theme;
-    if (!job) return ['No role selected.', '', 'Try another tab or clear the filter with /.'];
+    if (!job) return ['No role selected.', '', 'Try g to change/clear the agent filter, or / for text.'];
     const lines:string[] = [];
     const add = (s: string, color='text') => { lines.push(...wrapTextWithAnsi(th.fg(color, clean(s)), Math.max(8,width))); };
     add(job.title, 'accent'); add(job.company); lines.push('');
@@ -103,6 +105,8 @@ export class CareerScreen {
     add(`Salary: ${typeof job.salary === 'object' && job.salary ? JSON.stringify(job.salary) : job.salary || 'not published'}`, 'muted');
     add(`Your status: ${job.status}   Listing: ${job.lifecycle}`, job.lifecycle === 'active' ? 'success' : 'warning');
     add(`Last seen: ${job.last_seen?.slice(0,10) || 'unknown'} — verify before applying`, 'muted');
+    const match=this.state.semantic?.active && this.state.semantic.matches[job.id];
+    if (match) { lines.push('');add(`Prompt match: ${match.level}${this.state.semantic.assessed[job.id] !== (job.evidence_hash || '') ? ' (older evidence; reapply)' : ''}`, match.level==='uncertain'?'warning':'accent');add(match.reason); }
     lines.push(''); add('Why it may fit', 'accent');
     for (const m of (job.matches?.length ? job.matches : ['No detailed fit assessment yet. Ask the agent.'])) add('• '+m);
     lines.push(''); add('What to check', 'warning');
@@ -126,12 +130,18 @@ export class CareerScreen {
     if (this.filtering) {
       for (const l of this.filter.render(Math.max(1,w-10))) line(' Filter: '+l);
     } else line(th.fg('muted',` / Filter: ${this.state.query || 'all companies and locations'}    f: ${this.state.lane}`));
+    const semantic=this.state.semantic;
+    const pending=unassessedCount(this.jobs,semantic);
+    const label=semantic?.active ? `${pending ? `${pending} new/changed — reapply · ` : ''}${semantic.prompt}` : semantic?.prompt ? `off (last: ${semantic.prompt})` : 'off';
+    line(th.fg(semantic?.active?'accent':'muted',` g Agent filter: ${label}`));
     line(th.fg('dim', ` Vault profile loaded on discussion · Inventory ${this.updated?.slice(0,16).replace('T',' ') || 'not loaded'}`));
     if (this.help) {
       for (const s of [
         ' Find work without remembering prompts or file names.', '',
         ' ↑/↓ or j/k  Browse roles        1–4 / Tab  Change section',
         ' /  Search title/company/place  f  Cycle role family',
+        ' g  Agent filter: describe, edit, reapply or clear',
+        ' Includes direct, related, tangential and uncertain matches.',
         ' Enter  Show all actions        v  Expand details (↑/↓ scroll)',
         ' a  Discuss fit / ask anything  p  Prepare application draft',
         ' s  Shortlist                   d  Dismiss     u  Restore',
@@ -139,7 +149,7 @@ export class CareerScreen {
         ' r  Reload saved vacancies      Esc / q  Return to agent chat', '',
         ' In chat: Ctrl+Alt+C returns here. /career also works.',
         ' Your choices are saved to the vault immediately.',
-        ' Browsing is local. Only asking/preparing calls the agent.',
+        ' Agent filtering, asking and preparing use your Pi model.',
         ' Preparation creates a draft. You review and submit it.', '',
         ' Press any key to return.'
       ]) line(th.fg('text', s));
@@ -164,7 +174,7 @@ export class CareerScreen {
         const label = `${chosen ? '›' : ' '} ${j.company}  ${j.title}`;
         left = th.fg(chosen ? 'accent' : 'text',chosen ? th.bold(label) : label);
         if (chosen) left = th.bg('selectedBg',left);
-      } else if (!list.length && row===1) left = th.fg('muted', ' No roles here. Change filters or browse Discover.');
+      } else if (!list.length && row===1) left = th.fg('muted', ' No roles here. g: agent filter · /: text filter · Tab: section.');
       if (split) {
         left = truncateToWidth(left,leftWidth);
         left += ' '.repeat(Math.max(0,leftWidth-visibleWidth(left)));
@@ -174,7 +184,29 @@ export class CareerScreen {
     line(th.fg('borderMuted','─'.repeat(w)));
     line(th.fg(this.error ? 'error' : this.busy ? 'warning' : 'success',' '+this.notice));
     line(th.fg('muted',` ${list.length ? this.state.index+1 : 0}/${list.length} roles   Enter Actions   a Ask   s Shortlist   p Prepare   v Details`));
-    line(th.fg('dim',' / Filter   f Role family   ? Help   Esc Agent chat   Ctrl+Alt+C Reopen'));
+    line(th.fg('dim',' g Agent filter   / Text   f Role family   ? Help   Esc Chat   Ctrl+Alt+C Reopen'));
     return out;
+  }
+}
+
+
+export class FilterProgress {
+  count=0; total=0; cost=0;
+  constructor(public tui:any,public theme:any,public prompt:string,public cancel:()=>void) {}
+  invalidate() {}
+  dispose() {this.cancel();}
+  update(progress:any) {Object.assign(this,progress);this.tui.requestRender();}
+  handleInput(data:string) {
+    if(matchesKey(data,'escape') || matchesKey(data,'ctrl+c')) this.cancel();
+  }
+  render(width:number) {
+    const lines=[this.theme.fg('accent',this.theme.bold(' Agent filter')), '',
+      ...wrapTextWithAnsi(clean(this.prompt),Math.max(8,width)), '',
+      `${this.count} / ${this.total || '…'} roles assessed. Includes tangential and uncertain matches.`,
+      'Matching cached listing evidence, not checking live vacancies.',
+      'Previous results stay in place until this run completes.',
+      this.cost ? `Estimated model cost so far: $${this.cost.toFixed(3)}` : '',
+      '',this.theme.fg('muted','Escape cancels and keeps your previous filter.')];
+    return lines.map(line=>truncateToWidth(line,width));
   }
 }

@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { CareerScreen } from './ui.ts';
+import { CareerScreen, FilterProgress } from './ui.ts';
+import { assessFilter, clearFilter, restoreSessionView } from './prompt-filter.mjs';
 import { clean, capability, safeUrl, saveAndReload, repairAndReload } from './model.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -20,7 +21,7 @@ function backend(args: string[], input?: any, signal?: AbortSignal): Promise<any
     const timer=setTimeout(()=>{child.kill('SIGTERM');finish(new Error('The vault operation timed out. Reload to check the saved state.'));},20000);
     signal?.addEventListener('abort',abort,{once:true});
     if (signal?.aborted) abort();
-    child.stdout.on('data',d=>{out+=d; if(out.length>3000000) {child.kill();finish(new Error('Vault response exceeded the size limit.'));}});
+    child.stdout.on('data',d=>{out+=d; if(out.length>12000000) {child.kill();finish(new Error('Vault response exceeded the size limit.'));}});
     child.stderr.on('data',d=>{err+=d;});
     child.on('error',e=>finish(e));
     child.on('close',code=>{
@@ -41,7 +42,8 @@ function openExternal(target:string) {
 }
 
 export default function career(pi: ExtensionAPI) {
-  let state={tab:0,index:0,id:undefined as string|undefined,query:'',lane:'All roles'};
+  let state=restoreSessionView([]);
+  let filterEpoch=0;
   let selected:any;
   let opening=false;
   let authorisation:any;
@@ -81,6 +83,7 @@ export default function career(pi: ExtensionAPI) {
             view.error=Boolean(refreshed.warning);
             return;
           }
+          if(action==='agent-filter') {done({kind:'agent-filter'});return;}
           if(!job) throw new Error('No role selected. Try another tab or filter.');
           if(action==='menu') {
             done({kind:'menu',job});return;
@@ -106,14 +109,19 @@ export default function career(pi: ExtensionAPI) {
       });
       pi.appendEntry('career-view',state);
       if(!outcome || outcome.kind==='close') {widget(ctx);return;}
+      if(outcome.kind==='agent-filter') {
+        await agentFilter(ctx);
+        opening=false;return await board(ctx);
+      }
       selected=outcome.job;
       widget(ctx);
       let kind=outcome.kind;
       if(kind==='menu') {
-        const choices=['Discuss fit / ask a question','Prepare application draft','Shortlist','Dismiss','Restore to Discover','Open listing','Open latest draft','Mark applied','Back to roles'];
+        const choices=['Agent prompt filter…','Discuss fit / ask a question','Prepare application draft','Shortlist','Dismiss','Restore to Discover','Open listing','Open latest draft','Mark applied','Back to roles'];
         const choice=await ctx.ui.select(`${selected.company} · ${selected.title}`,choices);
-        kind=({'Discuss fit / ask a question':'ask','Prepare application draft':'prepare','Shortlist':'shortlist','Dismiss':'dismiss','Restore to Discover':'restore','Open listing':'listing','Open latest draft':'draft','Mark applied':'applied'} as any)[choice || ''] || 'back';
+        kind=({'Agent prompt filter…':'agent-filter','Discuss fit / ask a question':'ask','Prepare application draft':'prepare','Shortlist':'shortlist','Dismiss':'dismiss','Restore to Discover':'restore','Open listing':'listing','Open latest draft':'draft','Mark applied':'applied'} as any)[choice || ''] || 'back';
       }
+      if(kind==='agent-filter') {await agentFilter(ctx);opening=false;return await board(ctx);}
       if(kind==='ask' || kind==='prepare') {
         let question='Assess this role against my saved profile. Explain fit, gaps and questions worth checking. Do not conduct an interview or repeat career intake.';
         if(kind==='ask') {
@@ -159,16 +167,54 @@ export default function career(pi: ExtensionAPI) {
     finally {opening=false;}
   }
 
+  async function agentFilter(ctx:any) {
+    const epoch=++filterEpoch;
+    const previous=state.semantic;
+    const choices=previous?.prompt
+      ? ['Edit prompt and apply','Reapply last prompt to current roles','Clear agent filter','Back to roles']
+      : ['Describe the roles you want','Back to roles'];
+    const choice=await ctx.ui.select('Agent filter · broad matches welcome',choices);
+    if(!choice || choice==='Back to roles') return;
+    if(choice==='Clear agent filter') {
+      state.semantic=clearFilter(previous);state.index=0;state.id=undefined;
+      pi.appendEntry('career-view',state);
+      ctx.ui.notify('Agent filter cleared. Text and role-family filters are unchanged. Last prompt retained.','info');
+      return;
+    }
+    let prompt=previous?.prompt || '';
+    if(choice!=='Reapply last prompt to current roles') {
+      const edited=await ctx.ui.editor('What roles interest you? Include tangential matches if useful.',prompt || '');
+      if(edited===undefined) return;
+      prompt=edited.trim();
+    }
+    if(!prompt || prompt.length>4000) {ctx.ui.notify('Enter a prompt of 1–4000 characters, or use Clear agent filter.','warning');return;}
+    if(!ctx.model) {ctx.ui.notify('Choose a Pi model before running an agent filter.','error');return;}
+    const outcome:any=await ctx.ui.custom((tui:any,theme:any,_kb:any,done:any)=>{
+      const controller=new AbortController();let finished=false;
+      const finish=(value:any)=>{if(finished)return;finished=true;done(value);};
+      const progress=new FilterProgress(tui,theme,prompt,()=>{controller.abort();finish({cancelled:true});});
+      void (async()=>{
+        const snapshot=await backend(['filter-candidates'],undefined,controller.signal);
+        return await assessFilter(snapshot,prompt,(context:any,signal:any)=>ctx.modelRegistry.complete(ctx.model,context,{
+          signal:AbortSignal.any([signal,AbortSignal.timeout(120000)]),maxTokens:12000,
+        }),controller.signal,(value:any)=>{if(!finished)progress.update(value);});
+      })().then(filter=>finish({filter})).catch(error=>finish({error:clean(error.message)}));
+      return progress;
+    });
+    if(epoch!==filterEpoch) return; // A session switch must not receive this run's result.
+    if(outcome.filter) {
+      state.semantic=outcome.filter;state.index=0;state.id=undefined;
+      pi.appendEntry('career-view',state);
+      ctx.ui.notify(`Agent filter applied: ${Object.keys(outcome.filter.matches).length} matches across ${Object.keys(outcome.filter.assessed).length} roles. Estimated model cost $${outcome.filter.cost.toFixed(3)}.`, 'info');
+    } else ctx.ui.notify(outcome.cancelled?'Cancelled. Your previous filter is unchanged.':`Filter failed; previous results kept. ${outcome.error}`,outcome.cancelled?'info':'error');
+  }
+
   pi.registerFlag('career',{description:'Open the Career board at startup',type:'boolean',default:false});
   pi.registerCommand('career',{description:'Browse jobs, shortlist and prepare applications',handler:async(_args,ctx)=>board(ctx)});
   pi.registerShortcut(Key.ctrlAlt('c'),{description:'Open Career job board',handler:async(ctx)=>board(ctx)});
   pi.on('session_start',async(_event,ctx)=>{
-    for(const entry of ctx.sessionManager.getBranch()) {
-      if(entry.type==='custom' && entry.customType==='career-view') {
-        const old:any=entry.data;
-        if(old && Number.isInteger(old.tab) && old.tab>=0 && old.tab<4 && typeof old.query==='string') state={...state,...old};
-      }
-    }
+    filterEpoch++;state=restoreSessionView(ctx.sessionManager.getBranch());
+    selected=undefined;authorisation=undefined;
     if(ctx.mode==='tui') {widget(ctx);if(pi.getFlag('career')===true) await board(ctx);}
   });
   pi.registerTool({

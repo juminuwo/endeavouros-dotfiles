@@ -168,8 +168,9 @@ class Backend:
             user = row.get('user', {})
             result[key] = clean({
                 'id': key, **{field: row.get(field) for field in
-                             ('title', 'company', 'location', 'workplace', 'salary', 'last_seen')},
+                             ('title', 'company', 'location', 'workplace', 'salary', 'employment', 'last_seen')},
                 'url': row.get('canonical_url') or row.get('url'),
+                'evidence_hash': row.get('content_hash') or '',
                 'lifecycle': row.get('lifecycle', 'unknown'),
                 'status': user.get('status', 'unseen'), 'revision': 0,
                 'updated_at': None, 'applied_at': None,
@@ -258,6 +259,13 @@ class Backend:
                     result['profile_truncated'].append(name)
             except FileNotFoundError:
                 result['profile_missing'].append(name)
+        result.update(self.description(key))
+        if 'warning' in listing:
+            result['warning'] = listing['warning']
+        return clean(result)
+
+    def description(self, key):
+        result = {}
         path = self.cache / (key + '.json')
         if path.exists():
             try:
@@ -269,9 +277,25 @@ class Backend:
                     result.update(description=cached['description'], description_cached_at=cached['cached_at'])
             except (Error, KeyError, TypeError, ValueError, AttributeError):
                 result['description_warning'] = 'Cached description malformed; omitted.'
-        if 'warning' in listing:
-            result['warning'] = listing['warning']
-        return clean(result)
+        return result
+
+    def filter_candidates(self):
+        listing = self.list()
+        candidates = []
+        for job in listing['jobs']:
+            if job['lifecycle'] != 'active' and job['status'] in {'unseen', 'reviewed'}:
+                continue
+            candidate = {key: job.get(key) for key in (
+                'id', 'title', 'company', 'location', 'workplace', 'salary', 'employment', 'lifecycle', 'status',
+                'evidence_hash', 'summary', 'matches', 'gaps', 'uncertainties')}
+            cached = self.description(job['id'])
+            text = cached.get('description', '')
+            candidate.update(description=(text if len(text) <= 6000 else text[:4500] + '\n[excerpt omitted]\n' + text[-1500:]),
+                             description_truncated=len(text) > 6000,
+                             description_cached_at=cached.get('description_cached_at'),
+                             evidence_limit='Cached description/excerpts, not live verification' if text else 'Summary only; no fresh cached description')
+            candidates.append(candidate)
+        return clean({'jobs': candidates, 'inventory_updated_at': listing['inventory_updated_at']})
 
     def check(self, job, target, expected, revision):
         if expected not in tuple(STATUSES) or target not in tuple(STATUSES):
@@ -410,6 +434,7 @@ def main(argv=None):
         parser.add_argument('--root', type=Path, default=DEFAULT_ROOT)
         commands = parser.add_subparsers(dest='command', required=True)
         commands.add_parser('list')
+        commands.add_parser('filter-candidates')
         commands.add_parser('refresh-board')
         context = commands.add_parser('context')
         context.add_argument('job_id')
@@ -424,6 +449,8 @@ def main(argv=None):
         backend = Backend(args.root)
         if args.command == 'list':
             result = backend.list()
+        elif args.command == 'filter-candidates':
+            result = backend.filter_candidates()
         elif args.command == 'context':
             result = backend.context(args.job_id)
         elif args.command == 'refresh-board':

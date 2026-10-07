@@ -23,3 +23,7 @@ Selection and filters survive discussion and return. Tab/1–4 switches destinat
 ## Feedback
 
 Browsing is immediate and local. Save operations disable repeated actions while in flight. Success is shown only after durable confirmation. Conflicts tell the user to reload; projection warnings distinguish a saved choice from a stale Markdown view. Display listing age and lifecycle, and label old automated scores as legacy ML scores rather than a new DS ranking. Inactive saved roles stay visible. Empty states suggest changing filters or returning to Discover.
+
+## Agent filtering
+
+The g action is independent of row selection and always available after loading, including empty results. Its menu offers describe/edit, reapply, clear and back. Show the active prompt (or retained inactive prompt) in a dedicated line. Put new/changed-evidence warnings before the prompt so truncation cannot hide them. Match level and evidence reason appear in role details. Preserve text/family filters and tab selection, with clear empty-state guidance. A cancellable progress view shows assessed/total and estimated model cost; replace results only after complete validation.

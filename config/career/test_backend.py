@@ -45,6 +45,28 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(caught.exception.payload['code'], code)
         return caught.exception.payload
 
+    def test_filter_candidates_are_readonly_and_bound_cached_evidence(self):
+        self.b.cache.mkdir()
+        (self.b.cache / 'job-a.json').write_text(json.dumps({
+            'job_id': 'job-a', 'cached_at': datetime.now(timezone.utc).isoformat(),
+            'description': 'Forecasting demand. ' + 'x' * 7000 + 'Capacity planning.'}))
+        self.inventory['jobs']['job-a'].update(workplace='remote', salary={'min': 80000}, employment='permanent')
+        self.inventory['jobs']['job-b']['lifecycle'] = 'expired'
+        self.write_inventory()
+        before = {p: p.read_bytes() for p in self.root.rglob('*') if p.is_file()}
+        result = self.b.filter_candidates()
+        self.assertEqual([j['id'] for j in result['jobs']], ['job-a'])
+        self.assertEqual(result['jobs'][0]['workplace'], 'remote')
+        self.assertEqual(result['jobs'][0]['salary'], {'min': 80000})
+        self.assertEqual(result['jobs'][0]['employment'], 'permanent')
+        self.assertTrue(result['jobs'][0]['description_truncated'])
+        self.assertIn('Capacity planning', result['jobs'][0]['description'])
+        self.assertLess(len(result['jobs'][0]['description']), 6100)
+        self.assertEqual(before, {p: p.read_bytes() for p in self.root.rglob('*') if p.is_file()})
+        self.inventory['jobs']['job-b']['user']['status'] = 'shortlisted'
+        self.write_inventory()
+        self.assertEqual(len(self.b.filter_candidates()['jobs']), 2)
+
     def test_choice_does_not_make_inventory_look_fresh(self):
         before = self.b.list()['inventory_updated_at']
         self.b.mutate('job-a', 'shortlisted', 'unseen', 0)

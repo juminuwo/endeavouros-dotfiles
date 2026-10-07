@@ -8,9 +8,11 @@ export function family(job) {
   if (/applied scien|machine learning scien/.test(t)) return 2;
   return 3;
 }
-export function filtered(jobs, tab, query = '', lane = 'All roles') {
+export function filtered(jobs, tab, query = '', lane = 'All roles', semantic = null) {
   const words = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
+  const ranks = {direct:0,related:1,tangential:2,uncertain:3};
   return jobs.filter(j => {
+    if (semantic?.active && !Object.hasOwn(semantic.matches,j.id)) return false;
     if (tab === 'Discover' && (j.lifecycle !== 'active' || ['dismissed', 'applied', 'draft', 'shortlisted'].includes(j.status))) return false;
     if (tab === 'Shortlist' && j.status !== 'shortlisted') return false;
     if (tab === 'Applications' && !['draft', 'applied'].includes(j.status)) return false;
@@ -19,7 +21,7 @@ export function filtered(jobs, tab, query = '', lane = 'All roles') {
     if (lane === 'ML / applied science' && family(j) < 2) return false;
     const haystack = `${j.title} ${j.company} ${j.location}`.toLowerCase();
     return words.every(w => haystack.includes(w));
-  }).sort((a, b) => family(a) - family(b) || (b.score ?? 0) - (a.score ?? 0) || a.company.localeCompare(b.company) || a.id.localeCompare(b.id));
+  }).sort((a, b) => (semantic?.active ? ranks[semantic.matches[a.id].level] - ranks[semantic.matches[b.id].level] : 0) || family(a) - family(b) || (b.score ?? 0) - (a.score ?? 0) || a.company.localeCompare(b.company) || a.id.localeCompare(b.id));
 }
 export function capability(job, action) {
   if (!job) return 'Select a role first.';
