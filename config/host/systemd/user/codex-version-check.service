@@ -1,0 +1,8 @@
+[Unit]
+Description=Notify when the Codex background server needs an update
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/codex-session-restart check
+TimeoutStartSec=30
+UMask=0077

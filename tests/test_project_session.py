@@ -327,6 +327,29 @@ focus_tab 0
             with self.assertRaisesRegex(RuntimeError, 'Cannot identify one main'):
                 ps.codex_session(123)
 
+    def test_resumed_vscode_rollout_preserves_identity_and_rejects_ambiguity(self):
+        sid = '01a0fc17-136d-7220-b7e0-73b22b657c40'
+        root = Path(self.tmp.name) / 'rollout-resumed.jsonl'
+        child = Path(self.tmp.name) / 'rollout-child.jsonl'
+        root.write_text(json.dumps({'type': 'session_meta', 'payload': {
+            'id': sid, 'cwd': '/repo', 'source': 'vscode', 'originator': 'codex-tui'}}))
+        child.write_text(json.dumps({'type': 'session_meta', 'payload': {
+            'id': '01a073ba-4300-7ae0-9c41-77ccaebc9374', 'cwd': '/repo',
+            'source': {'subagent': {}}}}))
+        window = {'id': 1, 'cwd': '/repo', 'foreground_processes': [
+            {'pid': 123, 'cmdline': ['/usr/bin/codex']}]}
+        with patch.object(Path, 'iterdir', return_value=iter([child, root])), \
+             patch.object(Path, 'read_bytes', return_value=b''):
+            info = ps.pane_info(window)
+        self.assertEqual(info['codex'], {'id': sid, 'cwd': '/repo'})
+        saved = ps.safe_session('launch \'kitty-unserialize-data={"id": 1}\' codex\n', {1: info})
+        self.assertIn('--session ' + sid, saved)
+
+        child.write_text(child.read_text().replace('{"subagent": {}}', '"cli"'))
+        with patch.object(Path, 'iterdir', return_value=iter([root, child])):
+            with self.assertRaisesRegex(RuntimeError, 'Cannot identify one main'):
+                ps.codex_session(123)
+
     def test_unknown_and_subagent_only_rollouts_are_not_roots(self):
         root = Path(self.tmp.name) / 'rollout-other.jsonl'
         for source in ('unknown', None, {'subagent': {}}):
@@ -353,6 +376,89 @@ focus_tab 0
                 self.capture()
         self.assertEqual(pointer, (self.state / 'current.json').read_bytes())
         self.assertEqual(list((self.state / 'snapshots').iterdir()), [folder])
+
+
+class RestoredStartupTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.home = Path(self.tmp.name)
+        self.sid = '01a0fc17-136d-7220-b7e0-73b22b657c40'
+        self.child = ['codex', 'resume', self.sid, '--cd', '/repo']
+        self.parent = ['python3', ps.HELPER, 'pane', '--cwd', '/repo', '--session', self.sid]
+        self.screen = ('Background server has incompatible feature settings '
+                       'Restart will use these shared feature settings: '
+                       'Run without daemon this time Restart with these settings')
+        self.w = {'id': 7, 'pid': 10, 'foreground_processes': [{'pid': 20}]}
+        self.meta = {'id': self.sid, 'cwd': '/repo', 'source': 'vscode'}
+        self.file = self.home / 'sessions' / ('rollout-date-' + self.sid + '.jsonl')
+        self.file.parent.mkdir()
+        self.persist()
+        self.stat_reads = 0
+        self.replaced = False
+        original_read_text = Path.read_text
+        def text(path, *args, **kwargs):
+            if str(path) == '/proc/20/status':
+                return 'PPid: 10\n'
+            if str(path) in ('/proc/20/stat', '/proc/10/stat'):
+                self.stat_reads += 1
+                token = 'changed' if self.replaced and self.stat_reads > 2 else '100'
+                return '20 (codex) ' + ' '.join(['0'] * 19 + [token])
+            return original_read_text(path, *args, **kwargs)
+        def binary(path):
+            args = self.child if str(path) == '/proc/20/cmdline' else self.parent
+            return b'\0'.join(a.encode() for a in args) + b'\0'
+        for patcher in (patch.object(Path, 'read_text', text), patch.object(Path, 'read_bytes', binary),
+                        patch.object(ps, 'kitty_windows', side_effect=lambda: {1: ('/tmp/kitty-test', {'tabs': [{'windows': [self.w]}]})}),
+                        patch.object(ps, 'rc', side_effect=lambda *a: self.screen)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def persist(self):
+        self.file.write_text(json.dumps({'type': 'session_meta', 'payload': self.meta}))
+
+    def test_blocked_restore_has_exact_persisted_identity(self):
+        self.assertEqual(ps.restored_startup_session(20, self.home), {'id': self.sid, 'cwd': '/repo'})
+
+    def test_wrapper_uuid_mismatch_is_rejected(self):
+        self.parent[-1] = 'another'
+        self.assertIsNone(ps.restored_startup_session(20, self.home))
+
+    def test_unrelated_parent_is_rejected(self):
+        self.parent[1] = '/tmp/unrelated.py'
+        self.assertIsNone(ps.restored_startup_session(20, self.home))
+
+    def test_dialog_in_another_pane_is_not_evidence(self):
+        self.w['pid'] = 11
+        self.assertIsNone(ps.restored_startup_session(20, self.home))
+
+    def test_disappearing_dialog_cannot_keep_resolving(self):
+        self.assertIsNotNone(ps.restored_startup_session(20, self.home))
+        self.screen = 'normal prompt'
+        self.assertIsNone(ps.restored_startup_session(20, self.home))
+
+    def test_process_replacement_is_rejected(self):
+        self.replaced = True
+        with self.assertRaisesRegex(RuntimeError, 'process changed'):
+            ps.restored_startup_session(20, self.home)
+
+    def test_rollout_mismatches_and_subagents_are_rejected(self):
+        for field, value in [('id', 'another'), ('cwd', '/different'), ('source', {'subagent': {}})]:
+            with self.subTest(field=field):
+                self.meta = {'id': self.sid, 'cwd': '/repo', 'source': 'vscode', field: value}
+                self.persist()
+                self.assertIsNone(ps.restored_startup_session(20, self.home))
+
+    def test_corrupt_rollout_is_error(self):
+        self.file.write_text('invalid')
+        with self.assertRaises(ValueError):
+            ps.restored_startup_session(20, self.home)
+
+    def test_live_only_discovery_never_uses_startup_fallback(self):
+        with patch.object(Path, 'iterdir', return_value=iter([])), patch.object(ps.codex_state, 'resolve', return_value=None), patch.object(ps, 'restored_startup_session') as startup:
+            with self.assertRaises(ps.CodexSessionPending):
+                ps.codex_session(20, allow_startup=False)
+        startup.assert_not_called()
 
 
 if __name__ == "__main__":

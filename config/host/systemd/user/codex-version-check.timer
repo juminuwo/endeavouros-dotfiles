@@ -1,0 +1,9 @@
+[Unit]
+Description=Check Codex CLI and server versions after package updates
+
+[Timer]
+OnStartupSec=2min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target

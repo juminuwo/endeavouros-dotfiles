@@ -150,6 +150,7 @@ enable_user_units \
   credit-claim.timer \
   credit-claim-notify.timer \
   desktop-session-save.timer \
+  codex-version-check.timer \
   imoto-wiki-publish.timer
 
 # The coordinated autosave timer supersedes the earlier standalone project timer.

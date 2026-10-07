@@ -102,6 +102,7 @@ def app_command(command_line, properties):
 
 def save(auto=False, shutdown=False, projects_only=False):
     desktop = ps.desktop_id()
+    ps.check_codex_restart(desktop)
     ready = ps.read_json(STATE / 'restore.json', {})
     frozen = ps.read_json(STATE / 'shutdown.json', {})
     if frozen.get('desktop') == desktop and not shutdown:

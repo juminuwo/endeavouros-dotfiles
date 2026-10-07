@@ -154,6 +154,37 @@ server filter and trigger remote MCP authentication, so the saver rejects them
 before making that request. Update with
 `codex app-server daemon update --from-cli --yes` when active Codex work can be
 interrupted; updating the CLI alone does not update the pinned server.
+The project switcher menu includes **restart Codex server and sessions**, with
+Cancel selected by default in an “Are you sure?” dialog. After confirmation,
+it saves the entire desktop, exits the captured Codex clients, installs the
+current CLI package as the server, restarts it, and resumes the same conversation
+IDs in their existing Kitty panes. Active work is interrupted and unsent input
+is not restored; other applications stay open. Unsupported panes, unknown
+conversations, or a failed initial save prevent the restart from beginning.
+
+`codex-version-check.timer` compares CLI, installed server, and running server
+versions every five minutes, including after `yay`/pacman updates. It sends one
+notification per mismatch; it never updates or restarts sessions automatically.
+Use the confirmed menu action to apply the update. No package-manager hook or
+root permissions are needed. The timer is enabled by `./host-install`.
+
+The restart runs in a separate persistent user unit named
+`codex-session-restart-<id>`. Its phase and exact recovery targets are recorded
+privately in `~/.local/state/desktop-session/codex-restart.json`. If a step fails,
+the last good snapshots stay protected. Choose the confirmed action again to
+retry those targets; a changed conversation or replaced pane is rejected rather
+than overwritten. Inspect the notification and `journalctl --user -u
+'codex-session-restart-*'` for the failure. `codex-session-restart preflight`
+checks whether current sessions are supported without restarting anything.
+Restored panes may include the waiting `project-session pane` supervisor;
+that known root process is not treated as unrelated foreground work. If a
+restored client is paused at Codex's feature-settings dialog, capture requires
+agreement between its explicit resume command, parent wrapper, live dialog and
+persisted conversation. Restart completion still requires a live conversation
+connection, so remaining at that dialog cannot report success.
+Recovery applies to the current desktop login; a new login restores the previous
+snapshot normally.
+
 If launching the update through a temporary systemd service, set
 `RemainAfterExit=yes` before starting it: the restarted daemon inherits that
 service's cgroup. Otherwise systemd sends it a shutdown signal when the updater

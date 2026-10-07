@@ -86,6 +86,7 @@
     ~/.local/bin/project-switch: config/bin/project-switch
     ~/.local/bin/project-session: config/bin/project-session
     ~/.local/bin/desktop-session: config/bin/desktop-session
+    ~/.local/bin/codex-session-restart: config/bin/codex-session-restart
     ~/.local/bin/project-status: config/bin/project-status
     ~/.local/bin/services-workflow: config/bin/services-workflow
     ~/.local/bin/repair-japanese-epubs: config/bin/repair-japanese-epubs

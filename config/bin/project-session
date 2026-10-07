@@ -150,10 +150,58 @@ class CodexSessionPending(RuntimeError):
     """A foreground Codex has not opened its conversation file yet."""
 
 
-def codex_session(pid):
+def restored_startup_session(pid, home):
+    """Resolve a saved restore target paused at Codex's startup feature dialog.
+
+    This is a restorable identity, not evidence that the client is connected.
+    Require agreement between the child command, our parent wrapper, the live
+    Kitty startup dialog, and the persisted main conversation.
+    """
+    args = [os.fsdecode(a) for a in Path(f'/proc/{pid}/cmdline').read_bytes().split(b'\0') if a]
+    if len(args) != 5 or Path(args[0]).name != 'codex' or args[1] != 'resume' or args[3] != '--cd':
+        return None
+    def started(process):
+        return Path(f'/proc/{process}/stat').read_text().rsplit(')', 1)[1].split()[19]
+    child_start = started(pid)
+    sid, cwd = str(uuid.UUID(args[2])), args[4]
+    parent = int(next(line.split()[1] for line in Path(f'/proc/{pid}/status').read_text().splitlines()
+                      if line.startswith('PPid:')))
+    parent_start = started(parent)
+    wrapper = [os.fsdecode(a) for a in Path(f'/proc/{parent}/cmdline').read_bytes().split(b'\0') if a]
+    if wrapper and Path(wrapper[0]).name in {'python', 'python3'}:
+        wrapper = wrapper[1:]
+    if (len(wrapper) != 6 or Path(wrapper[0]).resolve() != Path(HELPER).resolve() or
+            wrapper[1:] != ['pane', '--cwd', cwd, '--session', sid]):
+        return None
+    for socket, ow in kitty_windows().values():
+        for tab in ow['tabs']:
+            for window in tab['windows']:
+                if window.get('pid') != parent or not any(p['pid'] == pid for p in window.get('foreground_processes', [])):
+                    continue
+                screen = ' '.join(rc(socket, 'get-text', '--match', f"id:{window['id']}", '--extent', 'screen').split())
+                if not all(text in screen for text in ('Background server has incompatible',
+                        'Restart will use these shared feature settings:',
+                        'Run without daemon this time', 'Restart with these settings')):
+                    return None
+                files = list((home / 'sessions').rglob(f'rollout-*-{sid}.jsonl'))
+                if len(files) != 1:
+                    return None
+                with files[0].open() as stream:
+                    event = json.loads(stream.readline())
+                meta = event.get('payload', {})
+                if (event.get('type') == 'session_meta' and meta.get('id') == sid and
+                        meta.get('source') in ('cli', 'exec', 'vscode') and meta.get('cwd') == cwd):
+                    if started(pid) != child_start or started(parent) != parent_start:
+                        raise RuntimeError('Restored Codex process changed during startup capture')
+                    return {'id': sid, 'cwd': cwd}
+    return None
+
+
+def codex_session(pid, allow_startup=True):
     """Resolve only this process's main conversation, never latest-by-cwd.
 
-    Codex keeps subagent rollouts open too: only cli/exec roots qualify. A
+    Source records creation origin, including vscode for resumed TUI threads.
+    Codex keeps subagent rollouts open too: only known root origins qualify. A
     missing/ambiguous root aborts this save and leaves the prior snapshot intact.
     """
     roots = {}
@@ -167,7 +215,7 @@ def codex_session(pid):
             with target.open() as stream:
                 event = json.loads(stream.readline())
             meta = event.get("payload", {})
-            if event.get("type") == "session_meta" and meta.get("source") in ("cli", "exec"):
+            if event.get("type") == "session_meta" and meta.get("source") in ("cli", "exec", "vscode"):
                 sid = str(uuid.UUID(meta["id"]))
                 roots[sid] = {"id": sid, "cwd": meta["cwd"]}
         except (OSError, ValueError, KeyError):
@@ -178,6 +226,8 @@ def codex_session(pid):
             if item.startswith(b'CODEX_HOME='):
                 home = Path(os.fsdecode(item.split(b'=', 1)[1]))
         session = codex_state.resolve(pid, home)
+        if session is None and allow_startup:
+            session = restored_startup_session(pid, home)
         if session is None:
             raise CodexSessionPending(f"Codex PID {pid} has no saved conversation yet; send its first prompt or close the unused tab")
         roots[session['id']] = session
@@ -246,6 +296,12 @@ def signature(windows):
     return [(ws, n["window"], sorted(n.get("marks", []))) for ws, n in windows]
 
 
+def check_codex_restart(desktop):
+    journal = read_json(STATE.parent / 'desktop-session/codex-restart.json', {})
+    if journal.get('desktop') == desktop and journal.get('phase') != 'complete':
+        raise RuntimeError('Codex restart is incomplete; retry the confirmed restart action. Previous snapshot retained')
+
+
 def save(auto=False, expected_windows=None):
     codex_state.begin_capture()
     try:
@@ -254,6 +310,7 @@ def save(auto=False, expected_windows=None):
         if auto:
             return
         raise
+    check_codex_restart(desktop)
     journal = read_json(STATE / "restore.json", {})
     if journal.get("desktop") != desktop or not journal.get("complete"):
         if auto:

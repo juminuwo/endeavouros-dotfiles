@@ -490,6 +490,7 @@ cmd_switch() {
         menu+=$'\n'"[ save all projects ]"
         menu+=$'\n'"[ save entire desktop ]"
         menu+=$'\n'"[ session save status ]"
+        menu+=$'\n'"[ restart Codex server and sessions ]"
         if [[ -n "$current" ]]; then
             menu+=$'\n'"[ rename '${current}' ]"
             menu+=$'\n'"[ delete '${current}' ]"
@@ -504,6 +505,7 @@ cmd_switch() {
             "[ save all projects ]") cmd_save; return ;;
             "[ save entire desktop ]") "$HOME/.local/bin/save_i3_session.sh"; return ;;
             "[ session save status ]") "$HOME/.local/bin/desktop-session" status --notify; return ;;
+            "[ restart Codex server and sessions ]") "$HOME/.local/bin/codex-session-restart" request; return ;;
             "[ rename '"*"' ]")     cmd_rename; return ;;
             "[ delete '"*"' ]")     cmd_delete; return ;;
         esac

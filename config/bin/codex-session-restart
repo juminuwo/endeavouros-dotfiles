@@ -1,0 +1,309 @@
+#!/usr/bin/env python3
+"""Confirmed Codex daemon upgrade/restart with exact Kitty conversation recovery."""
+import argparse
+import fcntl
+import importlib.machinery
+import importlib.util
+import json
+import os
+from pathlib import Path
+import shlex
+import signal
+import subprocess
+import time
+import uuid
+
+loader = importlib.machinery.SourceFileLoader('restart_desktop', str(Path(__file__).resolve().with_name('desktop-session')))
+spec = importlib.util.spec_from_loader(loader.name, loader)
+ds = importlib.util.module_from_spec(spec)
+loader.exec_module(ds)
+ps = ds.ps
+STATE = ds.STATE / 'codex-restart'
+JOURNAL = ds.STATE / 'codex-restart.json'
+SCRIPT = str(Path.home() / '.local/bin/codex-session-restart')
+SHELLS = {'zsh', 'bash', 'fish'}
+YES = 'Yes — save and restart Codex'
+
+
+def command(*args, timeout=90):
+    return subprocess.check_output(args, text=True, stderr=subprocess.PIPE, timeout=timeout)
+
+
+def versions():
+    return json.loads(command('codex', 'app-server', 'daemon', 'version', timeout=15))
+
+
+def aligned(v):
+    return (v.get('status') == 'running' and bool(v.get('cliVersion')) and
+            v.get('cliVersion') == v.get('managedCodexVersion') == v.get('appServerVersion'))
+
+
+def check_update():
+    v = versions()
+    key = {k: v.get(k) for k in ('cliVersion', 'managedCodexVersion', 'appServerVersion')}
+    path = STATE / 'notified.json'
+    if aligned(v):
+        path.unlink(missing_ok=True)
+    elif ps.read_json(path) != key:
+        ds.notify('Codex server update available',
+                  f"CLI {v.get('cliVersion')}; server {v.get('managedCodexVersion', 'not installed')}. "
+                  'Project switcher → restart Codex server and sessions. Confirmation required.')
+        ps.atomic_json(path, key)
+
+
+def request():
+    result = subprocess.run(['rofi', '-dmenu', '-no-custom', '-i', '-p', 'Restart Codex?',
+        '-mesg', 'Are you sure? Saves first, updates and restarts the server, and resumes all Kitty Codex conversations. '
+        'Active work will be interrupted; unsent input is not restored. Do not type in Codex tabs during the restart. Other applications stay open.',
+        '-config', str(Path.home() / '.config/rofi/rofidmenu.rasi')],
+        input='Cancel\n' + YES + '\n', text=True, capture_output=True, check=False)
+    if result.returncode != 0 or result.stdout.strip() != YES:
+        return
+    # This unit must stay alive after its worker returns: the daemon inherits
+    # its cgroup. Unique unit names allow future restarts without killing it.
+    command('systemd-run', '--user', '--no-block', '--collect',
+            '--unit=codex-session-restart-' + uuid.uuid4().hex[:12],
+            '--property=Type=oneshot', '--property=RemainAfterExit=yes',
+            '--property=TimeoutStartSec=infinity', SCRIPT, 'run')
+    ds.notify('Codex restart requested', 'Saving conversations before restarting. Completion or failure will be reported.')
+
+
+def start_time(pid):
+    # comm may contain spaces and parentheses.
+    return Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()[19]
+
+
+def is_pane_wrapper(args):
+    if args and Path(args[0]).name in {'python', 'python3'}:
+        args = args[1:]
+    return (len(args) >= 2 and Path(args[0]).resolve() == Path(ps.HELPER).resolve()
+            and args[1] == 'pane')
+
+
+def foreground(w):
+    # Restored panes keep the Python supervisor in Codex's foreground group.
+    # It waits for Codex, then execs the shell in this same root PID. Exclude
+    # only that known supervisor, never arbitrary Python or other jobs.
+    return [p for p in w.get('foreground_processes', []) if p.get('cmdline')
+            and not (p['pid'] == w.get('pid') and is_pane_wrapper(p['cmdline']))]
+
+
+def is_codex(p):
+    return bool(p.get('cmdline')) and Path(p['cmdline'][0]).name == 'codex'
+
+
+def panes():
+    return {(str(sock), w['id']): w for sock, ow in ps.kitty_windows().values()
+            for tab in ow['tabs'] for w in tab['windows']}
+
+
+def client_codex_pids():
+    found = set()
+    for proc in Path('/proc').glob('[0-9]*'):
+        try:
+            if proc.stat().st_uid != os.getuid():
+                continue
+            args = proc.joinpath('cmdline').read_bytes().split(b'\0')
+            if not args or Path(os.fsdecode(args[0])).name != 'codex' or b'app-server' in args:
+                continue
+            found.add(int(proc.name))
+        except (FileNotFoundError, ProcessLookupError, PermissionError):
+            continue
+    return found
+
+
+def capture():
+    ps.codex_state.begin_capture()
+    result = []
+    for (sock, wid), w in panes().items():
+        roots = [p for p in foreground(w) if is_codex(p)]
+        if not roots:
+            continue
+        if len(roots) != 1 or len(foreground(w)) != 1:
+            raise RuntimeError(f'Pane {wid} has other foreground work; finish it before restarting')
+        p = roots[0]
+        # Shell-backed panes survive SIGTERM; directly launched Codex does not.
+        base = w.get('cmdline') or ['']
+        helper = is_pane_wrapper(base)
+        if (Path(base[0]).name not in SHELLS and not helper) or w['pid'] == p['pid']:
+            raise RuntimeError(f'Pane {wid} is not shell-backed; restart it manually')
+        session = ps.codex_session(p['pid'])
+        if Path(session.get('home', Path.home() / '.codex')).resolve() != (Path.home() / '.codex').resolve():
+            raise RuntimeError('A session uses a different CODEX_HOME; restart it separately')
+        result.append({'socket': sock, 'window': wid, 'shell_pid': w['pid'],
+                       'shell_start': start_time(w['pid']), 'pid': p['pid'],
+                       'start': start_time(p['pid']), 'session': session})
+    ps.codex_state.verify_capture()
+    if client_codex_pids() != {e['pid'] for e in result}:
+        raise RuntimeError('Codex is running outside the supported Kitty panes; close or restart those sessions separately')
+    return result
+
+
+def pane(entry):
+    w = panes().get((entry['socket'], entry['window']))
+    if (w is None or w['pid'] != entry['shell_pid'] or
+            start_time(w['pid']) != entry['shell_start']):
+        raise RuntimeError(f"Original pane {entry['window']} disappeared or was replaced; recovery details: {JOURNAL}")
+    return w
+
+
+def current_pid(entry):
+    w = pane(entry)
+    fg = foreground(w)
+    if len(fg) != 1:
+        raise RuntimeError(f"Pane {entry['window']} is not ready for restart")
+    p = fg[0]
+    if p['pid'] == entry['shell_pid'] and Path(p['cmdline'][0]).name in SHELLS:
+        return None
+    if not is_codex(p):
+        raise RuntimeError(f"Pane {entry['window']} is running another command")
+    ps.codex_state.begin_capture()
+    if ps.codex_session(p['pid']) != entry['session']:
+        raise RuntimeError(f"Pane {entry['window']} now contains another conversation")
+    ps.codex_state.verify_capture()
+    return p['pid']
+
+
+def wait_shell(entry):
+    deadline = time.monotonic() + 25
+    while time.monotonic() < deadline:
+        w = pane(entry)
+        fg = foreground(w)
+        if (len(fg) == 1 and fg[0]['pid'] == entry['shell_pid'] and
+                Path(fg[0]['cmdline'][0]).name in SHELLS):
+            return
+        time.sleep(.2)
+    raise RuntimeError(f"Codex did not exit in pane {entry['window']}; no force kill was used")
+
+
+def write_journal(journal, phase):
+    journal['phase'] = phase
+    ps.atomic_json(JOURNAL, journal)
+
+
+def resume_command(entry):
+    s = entry['session']
+    args = ['codex', 'resume', s['id'], '--cd', s['cwd']]
+    if s.get('home'):
+        args = ['env', 'CODEX_HOME=' + s['home']] + args
+    # The old process has exited and the original shell owns this pane.
+    # Ctrl+U clears a leftover editable line; never send a model prompt.
+    return '\x15' + shlex.join(args) + '\n'
+
+
+def verify_sessions(entries):
+    deadline = time.monotonic() + 75
+    error = None
+    while time.monotonic() < deadline:
+        try:
+            ps.codex_state.begin_capture()
+            for e in entries:
+                fg = foreground(pane(e))
+                if len(fg) != 1 or not is_codex(fg[0]):
+                    raise RuntimeError(f"Codex has not started in pane {e['window']}")
+                # A saved resume target paused at the feature dialog is safe
+                # to recover, but is not a successfully restarted client.
+                if ps.codex_session(fg[0]['pid'], allow_startup=False) != e['session']:
+                    raise RuntimeError(f"Conversation has not resumed in pane {e['window']}")
+            ps.codex_state.verify_capture()
+            return
+        except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
+            error = exc
+            time.sleep(1)
+    raise RuntimeError(f'Resume verification failed: {error}')
+
+
+def execute(journal):
+    entries = journal['entries']
+    # Validate every target before stopping the first. Retrying a partial
+    # restart accepts only the original shell or the same saved conversation.
+    targets = [(e, current_pid(e)) for e in entries]
+    if client_codex_pids() != {pid for _, pid in targets if pid is not None}:
+        raise RuntimeError('The set of running Codex sessions changed; recovery is paused')
+    write_journal(journal, 'stopping')
+    for e, pid in targets:
+        if pid is not None:
+            # pidfd pins the process even if the PID is reused during a race.
+            fd = os.pidfd_open(pid)
+            try:
+                if current_pid(e) != pid:
+                    raise RuntimeError('Codex process changed during restart')
+                signal.pidfd_send_signal(fd, signal.SIGTERM)
+            finally:
+                os.close(fd)
+        wait_shell(e)
+    write_journal(journal, 'updating-server')
+    command('codex', 'app-server', 'daemon', 'stop')
+    command('codex', 'app-server', 'daemon', 'update', '--from-cli', '--yes')
+    command('codex', 'app-server', 'daemon', 'start')
+    if not aligned(versions()):
+        raise RuntimeError('Server and CLI versions still differ after updating')
+    write_journal(journal, 'resuming')
+    for e in entries:
+        if current_pid(e) is not None:
+            raise RuntimeError('A pane started another Codex during restart')
+        ps.rc(e['socket'], 'send-text', '--match', f"id:{e['window']}", resume_command(e))
+    verify_sessions(entries)
+    write_journal(journal, 'complete')
+
+
+def run():
+    # systemd's user manager does not inherit zsh's PATH. i3-resurrect is
+    # installed by uv in ~/.local/bin, and the desktop save invokes it by name.
+    os.environ['PATH'] = str(Path.home() / '.local/bin') + os.pathsep + os.environ.get('PATH', os.defpath)
+    # Catch failures without exiting this service unsuccessfully: even on a
+    # partial failure its cgroup may own the newly started daemon.
+    with (STATE / 'restart.lock').open('a') as exclusive:
+        try:
+            fcntl.flock(exclusive, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            ds.notify('Codex restart already running', 'Wait for its completion notification.')
+            return
+        try:
+            with (ds.STATE / 'session.lock').open('a') as desktop_lock:
+                fcntl.flock(desktop_lock, fcntl.LOCK_EX)
+                journal = ps.read_json(JOURNAL, {})
+                if journal.get('desktop') != ps.desktop_id() or journal.get('phase') == 'complete' or not journal:
+                    entries = capture()
+                    ds.save()
+                    with open(ps.LOCK, 'a') as project_lock:
+                        fcntl.flock(project_lock, fcntl.LOCK_EX)
+                        if capture() != entries:
+                            raise RuntimeError('Sessions changed during capture; retry restart')
+                        journal = {'desktop': ps.desktop_id(), 'entries': entries, 'phase': 'prepared'}
+                        write_journal(journal, 'prepared')
+                        execute(journal)
+                else:
+                    with open(ps.LOCK, 'a') as project_lock:
+                        fcntl.flock(project_lock, fcntl.LOCK_EX)
+                        execute(journal)
+                ds.save()
+            ds.notify('Codex restart complete', 'Server updated; all captured conversations resumed and desktop saved.')
+        except Exception as error:
+            failed = ps.read_json(JOURNAL, {})
+            if failed and failed.get('phase') != 'complete':
+                failed['error'] = str(error)
+                ps.atomic_json(JOURNAL, failed)
+            print(f'Codex restart failed: {error}', flush=True)
+            ds.notify('Codex restart needs attention',
+                      f'{error}. Use the restart action again to retry. Recovery: {JOURNAL}', error=True)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('action', choices=['request', 'run', 'check', 'preflight'])
+    args = parser.parse_args()
+    os.umask(0o077)
+    STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if args.action == 'request':
+        request()
+    elif args.action == 'run':
+        run()
+    elif args.action == 'check':
+        check_update()
+    else:
+        print(f'{len(capture())} Codex conversations can be restarted')
+
+
+if __name__ == '__main__':
+    main()
