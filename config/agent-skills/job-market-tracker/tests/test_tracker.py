@@ -363,12 +363,126 @@ class PersistenceTests(TrackerTestCase):
         self.assertEqual(self.tracker.pending_count(), 1)
 
     def test_ats_listing_closes_after_two_complete_missing_runs(self):
+        self.tracker.config["ats"]["greenhouse"] = [{"company": "Acme", "token": "acme"}]
+        self.tracker.successful_boards = {("greenhouse", "acme")}
         self.tracker._merge([self.record("greenhouse", "gone")])
         job = next(iter(self.tracker.state["jobs"].values()))
         self.tracker._update_lifecycle({"greenhouse"}, set())
         self.assertEqual(job["lifecycle"], "active")
         self.tracker._update_lifecycle({"greenhouse"}, set())
         self.assertEqual(job["lifecycle"], "closed")
+
+
+class BoardIsolationTests(TrackerTestCase):
+    def configure(self, source="greenhouse"):
+        key = {"greenhouse": "token", "lever": "site", "ashby": "board"}[source]
+        self.tracker.config["sources"] = {name: {"enabled": name == source} for name in tracker_module.SOURCE_RANK}
+        self.tracker.config["ats"][source] = [{"company": "Broken", key: "broken"}, {"company": "Acme", key: "acme"}]
+
+    def finish(self):
+        for job in self.tracker.pending(30)["jobs"]:
+            self.tracker.apply_scores({"run_id": self.tracker.run_status()["id"], "scores": [self.score(job["job_id"])]}, "test")
+        self.tracker.finalize_run()
+
+    def test_partial_failure_keeps_jobs_and_scopes_absence_and_alerts(self):
+        self.configure()
+        old = self.record(source_id="old")
+        old["company"] = "Broken"
+        self.tracker._merge([old, self.record(source_id="gone")])
+        self.start_workflow()
+        self.finish()
+        def fetch(url, headers=None):
+            if "/broken/" in url:
+                raise RuntimeError("HTTP 404")
+            return {"jobs": [{"id": "new", "title": "Senior Applied Scientist", "absolute_url": "https://x/new", "location": {"name": "London"}, "content": "Production ML"}]}
+        self.tracker.fetch_json = fetch
+        for _ in range(2):
+            run = self.tracker.collect()
+            self.assertFalse(run["all_sources_failed"])
+            self.finish()
+        jobs = {j["sources"][0]["source_id"]: j for j in self.tracker.state["jobs"].values()}
+        self.assertIn("new", jobs)
+        self.assertEqual(jobs["old"]["sources"][0]["missing_runs"], 0)
+        self.assertEqual(jobs["gone"]["lifecycle"], "closed")
+        health = self.tracker.state["source_health"]["greenhouse"]
+        self.assertEqual(health["status"], "partial")
+        self.assertEqual(health["count"], 1)
+        self.assertEqual(health["consecutive_failures"], 2)
+        self.assertIn("Broken (broken): HTTP 404", self.tracker.alerts()["source_alerts"][0]["error"])
+        self.tracker.fetch_json = lambda *_args: {"jobs": []}
+        self.tracker.collect()
+        self.finish()
+        self.assertEqual(self.tracker.state["source_health"]["greenhouse"]["consecutive_failures"], 0)
+        self.assertEqual(self.tracker.alerts()["source_alerts"], [])
+
+    def test_malformed_board_is_atomic_and_does_not_supply_absence(self):
+        self.configure()
+        valid = {"id": 1, "title": "Senior Applied Scientist", "absolute_url": "https://x/1", "location": {"name": "London"}}
+        for payload in ({}, {"jobs": None}, {"jobs": [valid, None]}, {"jobs": [valid, {}]}):
+            self.tracker.fetch_json = lambda url: payload if "/broken/" in url else {"jobs": []}
+            self.assertEqual(self.tracker.collect_greenhouse(), [])
+            self.assertNotIn(("greenhouse", "broken"), self.tracker.successful_boards)
+            self.assertIn(("greenhouse", "acme"), self.tracker.successful_boards)
+            self.assertTrue(self.tracker.board_errors["greenhouse"])
+
+    def test_removed_and_ambiguous_legacy_refs_do_not_age(self):
+        self.configure()
+        self.tracker.config["ats"]["greenhouse"].append({"company": "Acme", "token": "acme-other"})
+        removed = self.record(source_id="removed")
+        removed["company"] = "Wayve"
+        self.tracker._merge([removed, self.record(source_id="ambiguous")])
+        self.tracker.successful_boards = {("greenhouse", "acme"), ("greenhouse", "acme-other")}
+        for _ in range(2):
+            self.tracker._update_lifecycle({"greenhouse"}, set())
+        for job in self.tracker.state["jobs"].values():
+            self.assertEqual(job["sources"][0]["missing_runs"], 0)
+            self.assertEqual(job["lifecycle"], "active")
+
+    def test_lever_failure_keeps_later_board(self):
+        self.configure("lever")
+        def fetch(url):
+            if "/broken?" in url:
+                raise RuntimeError("HTTP 404")
+            return [{"id": "ok", "text": "Senior Applied Scientist", "hostedUrl": "https://x/ok", "categories": {"location": "London"}}]
+        self.tracker.fetch_json = fetch
+        self.assertEqual(len(self.tracker.collect_lever()), 1)
+        self.assertIn("Broken", self.tracker.board_errors["lever"][0])
+
+    def test_ashby_listed_secondary_location_precedence_and_user_preservation(self):
+        self.configure("ashby")
+        self.tracker.config["ats"]["ashby"] = [{"company": "Acme", "board": "acme"}]
+        item = {"title": "Senior Applied Scientist", "location": "Boston", "secondaryLocations": [{"location": "London"}], "jobUrl": "https://jobs.ashbyhq.com/acme/abc", "isListed": True, "workplaceType": "Hybrid", "descriptionPlain": "Production sensor ML", "publishedAt": "2026-10-01T00:00:00Z"}
+        self.tracker.fetch_json = lambda url: {"jobs": [item, {**item, "isListed": False, "jobUrl": "https://x/hidden"}]}
+        records = self.tracker.collect_ashby()
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["source_id"], item["jobUrl"])
+        self.assertEqual(records[0]["location"], "Boston; London")
+        self.assertIsNone(records[0]["salary"])
+        self.assertTrue(records[0]["full_description"])
+        old = self.record("reed", "old")
+        old["location"] = "Boston; London"
+        self.tracker._merge([old])
+        job = next(iter(self.tracker.state["jobs"].values()))
+        job["user"].update({"status": "shortlisted", "note": "Keep this", "rating": 4})
+        self.tracker._merge(records)
+        self.assertEqual(len(self.tracker.state["jobs"]), 1)
+        self.assertEqual(job["description_source"], "ashby")
+        self.assertEqual(job["canonical_url"], item["jobUrl"])
+        self.assertEqual(job["user"]["note"], "Keep this")
+        self.assertEqual(job["user"]["rating"], 4)
+        self.assertEqual(job["sources"][-1]["board"], "acme")
+        self.tracker._merge(self.tracker.collect_ashby())
+        self.assertEqual(len(job["sources"]), 2)
+
+    def test_ashby_empty_success_closes_missing_listing(self):
+        self.configure("ashby")
+        self.tracker.config["ats"]["ashby"] = [{"company": "Acme", "board": "acme"}]
+        self.tracker._merge([self.record("ashby", "gone")])
+        self.tracker.fetch_json = lambda url: {"jobs": []}
+        for _ in range(2):
+            self.tracker.collect_ashby()
+            self.tracker._update_lifecycle({"ashby"}, set())
+        self.assertEqual(next(iter(self.tracker.state["jobs"].values()))["lifecycle"], "closed")
 
 
 if __name__ == "__main__":

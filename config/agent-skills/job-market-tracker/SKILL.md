@@ -86,6 +86,13 @@ If any collection, scoring, application, finalization, or validation step fails,
 
 ## Review operations
 
+For interactive career sessions (shortlists, application drafts, interviews and
+weekly reviews), use `career-search` and the private Career folder's
+`Career Workflow.md`. Senior Data Scientist is now the primary interactive
+search target. Existing automated scores retain their earlier applied-ML
+rubric; do not silently rescore or change user preferences. Agent-proposed
+shortlists do not count as user ratings or confirmed applications.
+
 Set a user-controlled review state without changing automated evidence:
 
 ```bash

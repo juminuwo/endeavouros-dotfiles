@@ -35,7 +35,8 @@ COMPONENT_LIMITS = {
     "domain_alignment": 15,
     "logistics": 15,
 }
-SOURCE_RANK = {"greenhouse": 3, "lever": 3, "reed": 2, "adzuna": 1}
+ATS_SOURCES = {"greenhouse", "lever", "ashby"}
+SOURCE_RANK = {"greenhouse": 3, "lever": 3, "ashby": 3, "reed": 2, "adzuna": 1}
 QUERY_FAMILIES = [
     "Senior Applied Scientist",
     "Senior Machine Learning Engineer",
@@ -157,6 +158,8 @@ class Tracker:
         self.state = self._load_state()
         self.config = load_json(self.config_path, {})
         self.profile = load_json(self.profile_path, {})
+        self.board_errors: dict[str, list[str]] = {}
+        self.successful_boards: set[tuple[str, str]] = set()
 
     def _load_state(self) -> dict[str, Any]:
         default = {
@@ -298,17 +301,45 @@ class Tracker:
             full_description=len(clean_html(description)) >= 500,
         )
 
-    def collect_greenhouse(self) -> list[dict[str, Any]]:
+    def _collect_boards(self, source: str, key: str, url_template: str, normalize: Any) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []
-        for board in self.config.get("ats", {}).get("greenhouse", []):
-            token = board["token"]
-            url = f"https://boards-api.greenhouse.io/v1/boards/{urllib.parse.quote(token)}/jobs?content=true"
-            payload = self.fetch_json(url)
-            for item in payload.get("jobs", []):
-                normalized = self._normalize_greenhouse(item, board.get("company"))
-                if self._ats_candidate(normalized):
-                    results.append(normalized)
+        self.board_errors[source] = []
+        self.successful_boards = {item for item in self.successful_boards if item[0] != source}
+        for board in self.config.get("ats", {}).get(source, []):
+            board_id = str(board.get(key) or "")
+            label = f"{board.get('company') or board_id} ({board_id})"
+            try:
+                if not board_id:
+                    raise ValueError(f"missing board {key}")
+                url = url_template.format(board=urllib.parse.quote(board_id, safe=""))
+                payload = self.fetch_json(url)
+                items = payload if source == "lever" else payload.get("jobs") if isinstance(payload, dict) else None
+                if not isinstance(items, list):
+                    raise ValueError("invalid job list payload")
+                batch = []
+                for item in items:
+                    if not isinstance(item, dict):
+                        raise ValueError("invalid job record")
+                    if source == "ashby" and item.get("isListed") is not True:
+                        continue
+                    normalized = normalize(item, board.get("company"))
+                    if not normalized.get("source_id") or not normalized.get("title") or not normalized.get("url"):
+                        raise ValueError("job record missing identity, title or URL")
+                    normalized["board"] = board_id
+                    if self._ats_candidate(normalized):
+                        batch.append(normalized)
+                # A malformed board must not supply partial evidence of absence.
+                results.extend(batch)
+                self.successful_boards.add((source, board_id))
+            except Exception as exc:
+                self.board_errors[source].append(f"{label}: {redact(str(exc))}")
         return results
+
+    def collect_greenhouse(self) -> list[dict[str, Any]]:
+        return self._collect_boards(
+            "greenhouse", "token", "https://boards-api.greenhouse.io/v1/boards/{board}/jobs?content=true",
+            self._normalize_greenhouse,
+        )
 
     def _normalize_greenhouse(self, item: dict[str, Any], company: str | None) -> dict[str, Any]:
         return raw_job(
@@ -328,18 +359,33 @@ class Tracker:
         )
 
     def collect_lever(self) -> list[dict[str, Any]]:
-        results: list[dict[str, Any]] = []
-        for board in self.config.get("ats", {}).get("lever", []):
-            site = board["site"]
-            url = f"https://api.lever.co/v0/postings/{urllib.parse.quote(site)}?mode=json"
-            payload = self.fetch_json(url)
-            if not isinstance(payload, list):
-                raise RuntimeError(f"Lever board {site} returned a non-list payload")
-            for item in payload:
-                normalized = self._normalize_lever(item, board.get("company"))
-                if self._ats_candidate(normalized):
-                    results.append(normalized)
-        return results
+        return self._collect_boards(
+            "lever", "site", "https://api.lever.co/v0/postings/{board}?mode=json",
+            self._normalize_lever,
+        )
+
+    def collect_ashby(self) -> list[dict[str, Any]]:
+        # Public posting API: https://developers.ashbyhq.com/docs/public-job-posting-api
+        return self._collect_boards(
+            "ashby", "board", "https://api.ashbyhq.com/posting-api/job-board/{board}",
+            self._normalize_ashby,
+        )
+
+    def _normalize_ashby(self, item: dict[str, Any], company: str | None) -> dict[str, Any]:
+        locations = [item.get("location") or ""]
+        locations.extend(location.get("location") or "" for location in item.get("secondaryLocations") or [])
+        url = item.get("jobUrl")
+        return raw_job(
+            source="ashby",
+            source_id=item.get("id") or (canonical_url(url) if url else None),
+            title=item.get("title"), company=company,
+            location="; ".join(dict.fromkeys(filter(None, locations))),
+            url=url, description=item.get("descriptionPlain") or item.get("descriptionHtml"),
+            posted_at=item.get("publishedAt"), expires_at=None,
+            workplace=item.get("workplaceType") or ("remote" if item.get("isRemote") else None),
+            employment=item.get("employmentType"), salary=None,
+            full_description=bool(item.get("descriptionPlain") or item.get("descriptionHtml")),
+        )
 
     def _normalize_lever(self, item: dict[str, Any], company: str | None) -> dict[str, Any]:
         categories = item.get("categories") or {}
@@ -370,7 +416,7 @@ class Tracker:
 
     def _record_health(self, name: str, status: str, count: int = 0, error: str | None = None) -> None:
         old = self.state["source_health"].get(name, {})
-        consecutive = old.get("consecutive_failures", 0) + 1 if status == "failed" else 0
+        consecutive = old.get("consecutive_failures", 0) + 1 if status in {"failed", "partial"} else 0
         self.state["source_health"][name] = {
             "status": status,
             "last_run": iso_now(),
@@ -438,6 +484,8 @@ class Tracker:
                 f"(status={workflow.get('status') or 'not-started'}, pending={pending})"
             )
         started = iso_now()
+        self.board_errors = {}
+        self.successful_boards = set()
         found: list[dict[str, Any]] = []
         credentials: dict[str, Any] = {}
         credential_error = None
@@ -449,6 +497,7 @@ class Tracker:
         sources = [
             ("greenhouse", lambda: self.collect_greenhouse()),
             ("lever", lambda: self.collect_lever()),
+            ("ashby", lambda: self.collect_ashby()),
             ("adzuna", lambda: self.collect_adzuna(credentials)),
             ("reed", lambda: self.collect_reed(credentials)),
         ]
@@ -464,8 +513,13 @@ class Tracker:
             try:
                 batch = collector()
                 found.extend(batch)
-                successful.add(name)
-                self._record_health(name, "ok", len(batch))
+                errors = self.board_errors.get(name, [])
+                if errors:
+                    status = "partial" if any(source == name for source, _ in self.successful_boards) else "failed"
+                    self._record_health(name, status, len(batch), "; ".join(errors))
+                else:
+                    successful.add(name)
+                    self._record_health(name, "ok", len(batch))
             except KeyError as exc:
                 self._record_health(name, "blocked", error=str(exc).strip("'"))
             except Exception as exc:  # isolate sources by design
@@ -474,7 +528,7 @@ class Tracker:
         seen_source_ids = {(record["source"], str(record["source_id"])) for record in found}
         stats = self._merge(found)
         self._update_lifecycle(successful, seen_source_ids)
-        failures = [name for name, health in self.state["source_health"].items() if health["status"] == "failed"]
+        failures = [name for name, health in self.state["source_health"].items() if health["status"] in {"failed", "partial"}]
         enabled = [name for name, source in self.config.get("sources", {}).items() if source.get("enabled", True)]
         all_failed = bool(enabled) and all(self.state["source_health"].get(name, {}).get("status") == "failed" for name in enabled)
         run = {
@@ -613,9 +667,10 @@ class Tracker:
         key = (record["source"], str(record["source_id"]))
         for ref in job["sources"]:
             if (ref["source"], str(ref["source_id"])) == key:
-                ref.update({"url": url, "last_seen": iso_now(), "content_hash": content_hash, "missing_runs": 0})
+                ref.update({**({"board": record["board"]} if record.get("board") else {}), "url": url, "last_seen": iso_now(), "content_hash": content_hash, "missing_runs": 0})
                 return
         job["sources"].append({
+            **({"board": record["board"]} if record.get("board") else {}),
             "source": key[0],
             "source_id": key[1],
             "url": url,
@@ -649,10 +704,20 @@ class Tracker:
         for job in self.state["jobs"].values():
             for ref in job.get("sources", []):
                 key = (ref.get("source"), str(ref.get("source_id")))
-                if ref.get("source") in {"greenhouse", "lever"} & successful and key not in seen_source_ids:
+                source = ref.get("source")
+                board = ref.get("board")
+                if source in ATS_SOURCES and not board:
+                    # Legacy refs: only attribute absence to a unique configured employer board.
+                    board_key = {"greenhouse": "token", "lever": "site", "ashby": "board"}[source]
+                    candidates = [entry.get(board_key) for entry in self.config.get("ats", {}).get(source, [])
+                                  if norm(entry.get("company")) == norm(job.get("company"))]
+                    if len(candidates) == 1:
+                        board = candidates[0]
+                        ref["board"] = board
+                if source in ATS_SOURCES and (source, board) in self.successful_boards and key not in seen_source_ids:
                     ref["missing_runs"] = int(ref.get("missing_runs", 0)) + 1
-            ats_refs = [ref for ref in job.get("sources", []) if ref.get("source") in {"greenhouse", "lever"}]
-            non_ats_refs = [ref for ref in job.get("sources", []) if ref.get("source") not in {"greenhouse", "lever"}]
+            ats_refs = [ref for ref in job.get("sources", []) if ref.get("source") in ATS_SOURCES]
+            non_ats_refs = [ref for ref in job.get("sources", []) if ref.get("source") not in ATS_SOURCES]
             expiry = parse_date(job.get("expires_at"))
             last_seen = parse_date(job.get("last_seen"))
             if expiry and expiry < now:
@@ -847,7 +912,7 @@ class Tracker:
         health = self.state.get("source_health", {})
         source_alerts = []
         for name, value in health.items():
-            if value.get("status") == "failed" and ("authentication rejected" in (value.get("error") or "") or value.get("consecutive_failures", 0) >= 2):
+            if value.get("status") in {"failed", "partial"} and ("authentication rejected" in (value.get("error") or "") or value.get("consecutive_failures", 0) >= 2):
                 source_alerts.append({"source": name, "error": value.get("error"), "consecutive_failures": value.get("consecutive_failures")})
         if (self.state.get("last_run") or {}).get("all_sources_failed"):
             source_alerts.append({"source": "all", "error": "all enabled sources failed"})
@@ -945,7 +1010,7 @@ class Tracker:
         workflow = self.state.get("workflow_run") or {}
         lines.append(f"Workflow: {workflow.get('status', 'not-started')} · Scored this run: {workflow.get('scores_applied', 0)} · Batches: {workflow.get('batches_completed', 0)} · Pending: {workflow.get('pending_count', self.pending_count())}")
         lines.extend(["", "| Source | Status | Listings | Consecutive failures | Detail |", "|---|---:|---:|---:|---|"])
-        for name in ("greenhouse", "lever", "reed", "adzuna"):
+        for name in ("greenhouse", "lever", "ashby", "reed", "adzuna"):
             health = self.state.get("source_health", {}).get(name, {})
             lines.append(f"| {name.title()} | {health.get('status', 'not run')} | {health.get('count', 0)} | {health.get('consecutive_failures', 0)} | {md(health.get('error') or '')} |")
         lines.extend(["", "## New priority A/B", ""])
@@ -990,7 +1055,7 @@ class Tracker:
         lines.extend([
             "## Sources",
             "",
-            "Vacancies are collected from configured employer ATS boards and official job APIs. [Adzuna](https://www.adzuna.co.uk/) · [Reed](https://www.reed.co.uk/) · [Greenhouse](https://www.greenhouse.com/) · [Lever](https://www.lever.co/)",
+            "Vacancies are collected from configured employer ATS boards and official job APIs. [Adzuna](https://www.adzuna.co.uk/) · [Reed](https://www.reed.co.uk/) · [Greenhouse](https://www.greenhouse.com/) · [Lever](https://www.lever.co/) · [Ashby](https://www.ashbyhq.com/)",
             "",
         ])
         output = "\n".join(lines)
