@@ -1,13 +1,15 @@
 ---
 name: career-search
-description: Run Adrian's agent-assisted job search from the private Obsidian Career folder. Use for continuing the search, Senior Data Scientist role shortlists, application preparation, diagnostic or mock interviews, interview debriefs, and weekly pipeline reviews. Daily vacancy collection belongs to job-market-tracker.
+description: Run Adrian's agent-assisted job search from the private Obsidian Career folder. Use for continuing the search, Senior Data Scientist role shortlists, conversational CV tailoring and PDF delivery in Hermes chat, application preparation, diagnostic or mock interviews, interview debriefs, and weekly pipeline reviews. Daily vacancy collection belongs to job-market-tracker.
 ---
 
 # Career Search
 
 The durable workspace is `/home/howis/Documents/online-personal/Personal/Career/`.
 
-The preferred interface is the installed `career` launcher (Pi TUI), usable from any terminal directory. It opens roles directly; Enter shows actions and ? shows help. The agent receives selected-role and profile context automatically. For questions about using the interface, explain these controls rather than prescribing file names or diagnostic prompts.
+For a pasted job listing or a request to tailor a CV, work directly in the current conversation; Hermes chat is the preferred interface for tailoring and PDF delivery. Read [references/application-tailoring.md](references/application-tailoring.md) for that mode. Do not redirect the user to the TUI.
+
+For vacancy browsing, the preferred interface is the installed `career` launcher (Pi TUI), usable from any terminal directory. It opens roles directly; Enter shows actions and ? shows help. The agent receives selected-role and profile context automatically. For questions about using the interface, explain these controls rather than prescribing file names or diagnostic prompts.
 
 TUI choices are owned by `data/career-workspace.json`, with `Career Board.md` as a generated view. Never edit these directly or sync TUI choices through the old tracker's set-status operation. The collector inventory is read-only to this interface. Its versioned drafts live under `Applications/<job-id>/`.
 
@@ -21,6 +23,6 @@ For vacancy collection, use job-market-tracker and its supported commands. Inter
 
 Run interview sessions one question per turn, waiting for Adrian's attempt before feedback or solutions. Record observed evidence, hints, untested dimensions and the pending question if interrupted. Never infer readiness from prepared notes. Respect text-only and timing limits described in the workflow.
 
-Draft role-specific application material from supported claims. Adrian reviews and sends applications/messages; do not submit, contact people or automate LinkedIn through this workflow. Preserve submitted CV versions and record actual events only after confirmation.
+Draft role-specific application material from supported claims. Adrian reviews and sends employer applications/messages; do not submit, contact recruiters or automate LinkedIn through this workflow. Delivering a requested PDF back to Adrian in the current chat is authorised. Preserve submitted CV versions and record actual events only after confirmation.
 
 Before ending a work session, update the relevant pipeline or practice note and the Search State handoff. Preserve existing user edits, distinguish proposals from facts, and report any incomplete work. Do not publish Career content or expose private repositories, credentials or raw job descriptions.
