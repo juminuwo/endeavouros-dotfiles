@@ -68,6 +68,36 @@ class DiscoveryTests(unittest.TestCase):
         with patch.object(cs, 'listener_origins', return_value=set()):
             self.assertIsNone(cs.resolve(1234, self.home))
 
+    def test_confirmed_pending_mapping_defers_only_without_real_roots(self):
+        blank = (self.roots[0][0], 'pending', {'id': OTHER, 'cwd': '/same/repo'})
+        with patch.object(cs, 'daemon_roots', return_value=[blank]):
+            self.assertIsNone(cs.resolve(1234, self.home))
+        cs.begin_capture()
+        with patch.object(cs, 'daemon_roots', return_value=[blank, self.roots[0]]):
+            self.assertEqual(cs.resolve(1234, self.home), self.session)
+            cs.verify_capture()
+        cs.begin_capture()
+        with patch.object(cs, 'daemon_roots', return_value=[blank, (blank[0], 'unrestorable', self.session)]):
+            with self.assertRaisesRegex(RuntimeError, 'one connected'):
+                cs.resolve(1234, self.home)
+
+    def test_daemon_confirmed_blank_requires_connected_endpoint(self):
+        from unittest.mock import Mock
+        for status in ('connected', 'disconnected'):
+            cs.begin_capture()
+            rpc = Mock()
+            rpc.pages.side_effect = [[SID], [{'name': 'codex_tui',
+                'httpOrigin': self.roots[0][0], 'runtimeStatus': status}]]
+            rpc.call.return_value = {'thread': {'id': SID, 'cwd': '/repo', 'source': 'cli'}}
+            with patch.object(cs, 'Rpc', return_value=rpc), \
+                 patch.object(cs, 'persisted', return_value=False), \
+                 patch.object(cs, 'unused_startup_thread', return_value=True):
+                if status == 'connected':
+                    self.assertIsNone(cs.resolve(1234, self.home))
+                else:
+                    with self.assertRaisesRegex(RuntimeError, 'one connected'):
+                        cs.resolve(1234, self.home)
+
     def test_thread_metadata_excludes_subagents_but_accepts_resumed_vscode(self):
         class FakeRpc:
             def __init__(self, path): pass

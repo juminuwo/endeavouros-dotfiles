@@ -189,8 +189,7 @@ def daemon_roots(home):
             if thread.get('parentThreadId') or isinstance(thread.get('source'), dict):
                 continue
             saved = persisted(thread)
-            if not saved and unused_startup_thread(rpc, thread):
-                continue
+            unused = not saved and unused_startup_thread(rpc, thread)
             session = {'id': str(uuid.UUID(thread['id'])), 'cwd': thread['cwd']}
             if not isinstance(session['cwd'], str) or not Path(session['cwd']).is_absolute():
                 raise RuntimeError('Invalid Codex conversation directory')
@@ -200,6 +199,8 @@ def daemon_roots(home):
                     raise RuntimeError('Codex daemon ignored the local-only MCP filter; update the daemon')
                 if server['name'] == 'codex_tui' and server.get('httpOrigin'):
                     status = server.get('runtimeStatus') if saved else 'unrestorable'
+                    if unused and server.get('runtimeStatus') == 'connected':
+                        status = 'pending'
                     roots.append((server['httpOrigin'], status, session))
         return roots
     finally:
@@ -258,7 +259,12 @@ def resolve(pid, home):
         if home not in _cache:
             _cache[home] = daemon_roots(home)
         roots = _cache[home]
-    matches = [(status, session) for origin, status, session in roots if origin in origins]
+    candidates = [(status, session) for origin, status, session in roots if origin in origins]
+    matches = [(status, session) for status, session in candidates if status != 'pending']
+    if not matches and candidates:
+        if process_identity(pid) != identity or listener_origins(pid) != origins:
+            raise RuntimeError('Codex process changed during capture; retry')
+        return None
     if len(matches) != 1 or matches[0][0] != 'connected':
         raise RuntimeError(f'Cannot identify one connected, saved Codex conversation for PID {pid}; '
                            'close unused tasks in this tab or reopen the intended conversation in a new tab')
@@ -280,7 +286,7 @@ def verify_capture():
     _cache, _observed = None, {}
     fresh = {home: daemon_roots(home) for home in {r[0] for r in observed.values()}}
     for pid, (home, identity, origins, session) in observed.items():
-        matches = [(status, candidate) for origin, status, candidate in fresh[home] if origin in origins]
+        matches = [(status, candidate) for origin, status, candidate in fresh[home] if origin in origins and status != 'pending']
         if (process_identity(pid) != identity or listener_origins(pid) != origins or
                 matches != [('connected', session)]):
             raise RuntimeError('Codex conversation changed during capture; retry')
