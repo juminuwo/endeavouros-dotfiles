@@ -39,7 +39,7 @@ For frontend or UI work, read the repo root `DESIGN.md` when present before maki
 Personal system config lives in `~/git/endeavouros-dotfiles`. User services are grouped as `default.target` (personal always-on), `work.target` (work/project daemons, enabled automatically on MAIN), and `timers.target` (scheduled jobs). Use `services-workflow audit`, `services-workflow work status`, and `systemctl --user list-dependencies work.target`. Do not hand-edit `~/.config/systemd/user` when a repo-managed unit exists; edit `config/host/systemd/user/` in the dotfiles repo and run `./host-install`.
 
 ## Obsidian Vault
-The vault lives at `~/Documents/online-personal/`. For any vault-related task, the `obsidian-vault` skill loads the full structure, conventions, and publishing flow on trigger — don't duplicate vault content here.
+The vault lives at `~/Documents/online-personal/`. For any vault-related task, the `obsidian-vault` skill provides vault-specific context alongside the official Obsidian skills — don't duplicate vault content here.
 
 ## Imoto Labs Kanban (planning surface)
 The portfolio kanban for Imoto Labs work lives at `~/Documents/online-personal/Imoto Labs/Kanban.md`. For read-only planning questions ("what's next?", "what should I work on?", "what's in flight?"), use the `kanban-planner` agent.

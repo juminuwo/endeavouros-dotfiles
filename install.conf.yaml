@@ -40,6 +40,12 @@
     ~/.claude/skills/tech-wiki: config/agent-skills/tech-wiki
     ~/.claude/skills/update-projects: config/agent-skills/update-projects
     ~/.claude/skills/obsidian-vault: config/agent-skills/obsidian-vault
+    ~/.claude/skills/obsidian-markdown: config/agent-skills/obsidian-markdown
+    ~/.claude/skills/obsidian-bases: config/agent-skills/obsidian-bases
+    ~/.claude/skills/obsidian-cli: config/agent-skills/obsidian-cli
+    ~/.claude/skills/obsidian-headless: config/agent-skills/obsidian-headless
+    ~/.claude/skills/defuddle: config/agent-skills/defuddle
+    ~/.claude/skills/knap: config/agent-skills/knap
     ~/.claude/skills/kitty-codex-agents: config/agent-skills/kitty-codex-agents
     ~/.claude/skills/close-out-work: config/agent-skills/close-out-work
     ~/.claude/skills/imoto-one-pagers: config/agent-skills/imoto-one-pagers
@@ -50,6 +56,12 @@
     ~/.agents/skills/tech-wiki: config/agent-skills/tech-wiki
     ~/.agents/skills/update-projects: config/agent-skills/update-projects
     ~/.agents/skills/obsidian-vault: config/agent-skills/obsidian-vault
+    ~/.agents/skills/obsidian-markdown: config/agent-skills/obsidian-markdown
+    ~/.agents/skills/obsidian-bases: config/agent-skills/obsidian-bases
+    ~/.agents/skills/obsidian-cli: config/agent-skills/obsidian-cli
+    ~/.agents/skills/obsidian-headless: config/agent-skills/obsidian-headless
+    ~/.agents/skills/defuddle: config/agent-skills/defuddle
+    ~/.agents/skills/knap: config/agent-skills/knap
     ~/.agents/skills/kitty-codex-agents: config/agent-skills/kitty-codex-agents
     ~/.agents/skills/close-out-work: config/agent-skills/close-out-work
     ~/.agents/skills/imoto-one-pagers: config/agent-skills/imoto-one-pagers

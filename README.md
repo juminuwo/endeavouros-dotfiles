@@ -50,6 +50,21 @@ runs `git submodule update --init --recursive` to keep `dotbot/` itself current,
 then configures Hermes to read shared personal skills from
 `~/git/endeavouros-dotfiles/config/agent-skills` when `hermes` is installed.
 
+The official [Obsidian skills](https://github.com/obsidianmd/obsidian-skills)
+are vendored unchanged from commit `398127736bd4ba42d767b1419fee1a927508370b`
+under `config/agent-skills/`: `obsidian-markdown`, `obsidian-bases`,
+`obsidian-cli`, `obsidian-headless`, `defuddle`, and `knap`. Their MIT license
+is preserved in `config/agent-skills/OBSIDIAN-LICENSE`. Canvas is omitted from
+this installation. `obsidian-vault` contains only local vault context and
+Quartz publishing guidance. CLI dependencies are checked when needed; copying
+these skills does not install their CLI tools or change Sync/Publish settings.
+
+To update, copy those six directories (including their references) from
+`plugins/obsidian/skills/` at a reviewed upstream commit, refresh the license,
+and record the new commit here. Keep vault customizations in `obsidian-vault`
+so upstream skills remain replaceable. Run `./install` if skill links change,
+then reload skills or restart the agent.
+
 ### `./host-install`
 
 Installs configuration that needs root access or fixed system paths. Systemd unit files are sourced from `config/host/systemd/`; the Brave managed policy is linked from `config/brave/policies/managed/brave.json`.
