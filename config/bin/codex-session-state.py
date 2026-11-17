@@ -201,10 +201,35 @@ def daemon_roots(home):
                     status = server.get('runtimeStatus') if saved else 'unrestorable'
                     if unused and server.get('runtimeStatus') == 'connected':
                         status = 'pending'
+                    elif idle_ephemeral(thread) and server.get('runtimeStatus') == 'connected':
+                        status = 'idle-ephemeral'
                     roots.append((server['httpOrigin'], status, session))
         return roots
     finally:
         rpc.close()
+
+
+def idle_ephemeral(thread):
+    """Temporary /side chats are not resume targets, even after they finish.
+
+    This is not proof of empty history. Only omit this candidate when a unique
+    persisted parent shares its terminal endpoint; never omit an active side.
+    """
+    return (thread.get('ephemeral') is True and
+            thread.get('status', {}).get('type') == 'idle' and
+            'name' in thread and thread['name'] in (None, '') and
+            thread.get('preview') == '' and
+            'path' in thread and thread['path'] is None)
+
+
+def conversation_candidates(roots, origins):
+    candidates = [(origin, status, session) for origin, status, session in roots
+                  if origin in origins and status != 'pending']
+    saved = [candidate for candidate in candidates if candidate[1] == 'connected']
+    if len(saved) == 1:
+        candidates = [candidate for candidate in candidates
+                      if not (candidate[1] == 'idle-ephemeral' and candidate[0] == saved[0][0])]
+    return [(status, session) for _, status, session in candidates]
 
 
 def unused_startup_thread(rpc, thread):
@@ -260,7 +285,7 @@ def resolve(pid, home):
             _cache[home] = daemon_roots(home)
         roots = _cache[home]
     candidates = [(status, session) for origin, status, session in roots if origin in origins]
-    matches = [(status, session) for status, session in candidates if status != 'pending']
+    matches = conversation_candidates(roots, origins)
     if not matches and candidates:
         if process_identity(pid) != identity or listener_origins(pid) != origins:
             raise RuntimeError('Codex process changed during capture; retry')
@@ -286,7 +311,7 @@ def verify_capture():
     _cache, _observed = None, {}
     fresh = {home: daemon_roots(home) for home in {r[0] for r in observed.values()}}
     for pid, (home, identity, origins, session) in observed.items():
-        matches = [(status, candidate) for origin, status, candidate in fresh[home] if origin in origins and status != 'pending']
+        matches = conversation_candidates(fresh[home], origins)
         if (process_identity(pid) != identity or listener_origins(pid) != origins or
                 matches != [('connected', session)]):
             raise RuntimeError('Codex conversation changed during capture; retry')

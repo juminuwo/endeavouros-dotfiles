@@ -161,6 +161,16 @@ hidden `_proj_*` workspaces), including inactive projects, tabs, split layouts,
 working directories and exact running Codex conversation IDs. Other workspaces
 are captured and restored by the whole-desktop coordinator described above.
 
+Codex `/side` creates temporary side conversations by default. An idle,
+unnamed ephemeral thread with an empty preview and no rollout path does not
+block saving the unique connected, persisted conversation on the same terminal
+endpoint. Recovery resumes that saved conversation; temporary side history is
+not restored. Saving does not close or modify the live side conversation.
+Active side threads, ambiguous saved conversations, ephemeral-only terminals,
+and unknown metadata still block saving. These checks run again before the
+snapshot is published. This follows Codex's documented
+[/side behavior](https://learn.chatgpt.com/docs/developer-commands?surface=cli#start-a-side-chat-with-side).
+
 Codex versions using the shared app-server daemon are identified through each
 terminal process's owned loopback socket and the daemon's `codex_tui` connection
 metadata. This requires daemon 0.160.0 or newer, separately from the CLI version:

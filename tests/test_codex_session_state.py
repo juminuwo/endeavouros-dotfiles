@@ -193,6 +193,71 @@ class DiscoveryTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'changed'):
                 cs.verify_capture()
 
+    def test_side_chat_classification_and_capture_recheck(self):
+        side = {'id': OTHER, 'cwd': '/same/repo', 'source': 'vscode',
+                'ephemeral': True, 'status': {'type': 'idle'},
+                'name': None, 'preview': '', 'path': None}
+        metadata = dict(side)
+        runtime = {'status': 'connected'}
+        class FakeRpc:
+            def __init__(self, path): pass
+            def pages(self, method, params):
+                if method == 'thread/loaded/list': return [SID, OTHER]
+                return [{'name': 'codex_tui', 'httpOrigin': 'http://127.0.0.1:1234',
+                         'runtimeStatus': runtime['status'] if params['threadId'] == OTHER else 'connected'}]
+            def call(self, method, params):
+                if method != 'thread/read':
+                    if metadata.get('ephemeral') is True:
+                        raise AssertionError('Ephemeral history must not be probed or guessed')
+                    return {'data': [], 'nextCursor': None}
+                return {'thread': metadata if params['threadId'] == OTHER else
+                        {'id': SID, 'cwd': '/same/repo', 'source': 'vscode'}}
+            def close(self): pass
+        with patch.object(cs, 'Rpc', FakeRpc), \
+             patch.object(cs, 'persisted', side_effect=lambda t: t['id'] == SID):
+            self.assertEqual(cs.resolve(1234, self.home), self.session)
+            cs.verify_capture()
+            changes = [{'status': {'type': 'active'}}, {'name': 'named task'},
+                       {'preview': 'user message'}, {'path': '/rollout.jsonl'}]
+            for change in changes + [{'missing': key} for key in ('name', 'preview', 'path', 'ephemeral', 'status')]:
+                with self.subTest(change=change):
+                    metadata.clear(); metadata.update(side)
+                    cs.begin_capture()
+                    self.assertEqual(cs.resolve(1234, self.home), self.session)
+                    if 'missing' in change: metadata.pop(change['missing'])
+                    else: metadata.update(change)
+                    with self.assertRaisesRegex(RuntimeError, 'changed'):
+                        cs.verify_capture()
+                    cs.begin_capture()
+                    with self.assertRaisesRegex(RuntimeError, 'one connected'):
+                        cs.resolve(1234, self.home)
+            metadata.clear(); metadata.update(side)
+            cs.begin_capture()
+            cs.resolve(1234, self.home)
+            runtime['status'] = 'disconnected'
+            with self.assertRaisesRegex(RuntimeError, 'changed'):
+                cs.verify_capture()
+
+    def test_idle_side_requires_one_saved_conversation_on_same_endpoint(self):
+        side = (self.roots[0][0], 'idle-ephemeral', {'id': OTHER, 'cwd': '/same/repo'})
+        for roots in ([side], [side, (side[0], 'pending', self.session)],
+                      [side, self.roots[0], (side[0], 'connected', side[2])],
+                      [self.roots[0], (self.roots[1][0], side[1], side[2])]):
+            with self.subTest(roots=roots):
+                cs.begin_capture()
+                with patch.object(cs, 'daemon_roots', return_value=roots), \
+                     patch.object(cs, 'listener_origins', return_value={r[0] for r in roots}):
+                    with self.assertRaisesRegex(RuntimeError, 'one connected'):
+                        cs.resolve(1234, self.home)
+
+    def test_side_becoming_persisted_rejects_publication(self):
+        side = (self.roots[0][0], 'idle-ephemeral', {'id': OTHER, 'cwd': '/same/repo'})
+        with patch.object(cs, 'daemon_roots', return_value=[self.roots[0], side]):
+            cs.resolve(1234, self.home)
+        with patch.object(cs, 'daemon_roots', return_value=[self.roots[0], (side[0], 'connected', side[2])]):
+            with self.assertRaisesRegex(RuntimeError, 'changed'):
+                cs.verify_capture()
+
 
 class TransportTests(unittest.TestCase):
     def rpc_stub(self, version='0.160.0'):
